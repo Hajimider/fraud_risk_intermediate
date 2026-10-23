@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+
+# Original datasets are downloaded locally from the documented source
+data/*.csv
+data/*.parquet
+data/*.xlsx
+
+# Keep the small, representative report used by the README; ignore old runs
+reports/*
+!reports/.gitkeep
+!reports/latest.json
+!reports/test_scores.csv
+!reports/hour_profile.csv
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+Thumbs.db
