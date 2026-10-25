@@ -29,7 +29,16 @@
 
 ## 分析流程
 
-![交易反欺诈分析流程](docs/images/fraud-analysis-flow.png)
+```mermaid
+flowchart LR
+    A[公开信用卡 CSV] --> B[数据审计与时间切分]
+    B --> C[类别不平衡建模]
+    C --> D[验证集选模]
+    D --> E[测试集冻结评估]
+    E --> F[复核容量与成本策略]
+    F --> G[Streamlit 风控看板]
+    G --> H[AI 报告解读]
+```
 
 流程图对应一次完整运行：公开信用卡 CSV 先经过字段、标签和重复记录检查，再按交易时间冻结训练、验证和测试边界；特征构造与类别不平衡处理后比较逻辑回归和 XGBoost，依据验证集 AP 选择模型。测试集只用于后续时段评估，复核与拦截阈值在验证集单独搜索，并受复核容量和模拟成本约束。最终结果进入 Streamlit 风控看板，AI 只解释结构化报告，不改变模型、阈值或动作。
 
@@ -56,7 +65,7 @@
 
 ### 1. 数据概览：样本结构与验证边界
 
-[![数据概览：交易规模、质量检查、时间切分与相对小时画像](docs/images/dashboard-overview.png)](docs/images/dashboard-overview.png)
+[![数据概览：交易规模、质量检查、时间切分与相对小时画像](./docs/images/dashboard-overview.png)](./docs/images/dashboard-overview.png)
 
 数据共包含 284,807 笔交易，其中 492 笔欺诈，占比约
 **0.173%**，属于极度不平衡分类任务。单看准确率容易掩盖欺诈漏报，因此项目使用
@@ -68,8 +77,7 @@ AP 评估风险排序，并同时报告精确率、召回率等指标。
 
 ### 2. 模型比较：验证集选择，后续时间段测试
 
-[![模型比较：验证集 AP
-与冻结模型的测试集指标](docs/images/dashboard-models.png)](docs/images/dashboard-models.png)
+[![模型比较：验证集 AP 与冻结模型的测试集指标](./docs/images/dashboard-models.png)](./docs/images/dashboard-models.png)
 
   验证集模型               AP
 ------------------ --------
@@ -89,7 +97,7 @@ AP 评估风险排序，并同时报告精确率、召回率等指标。
 
 ### 3. 风险策略：受复核容量约束的离线模拟
 
-[![风险策略：冻结阈值、复核容量状态及测试集模拟成本](docs/images/dashboard-policy.png)](docs/images/dashboard-policy.png)
+[![风险策略：冻结阈值、复核容量状态及测试集模拟成本](./docs/images/dashboard-policy.png)](./docs/images/dashboard-policy.png)
 
 两个策略阈值只使用验证集选择。应用到测试集后，冻结策略放行 **43,662
 笔**、人工复核 **176 笔**、直接拦截 **0 笔**。复核率为 **0.40%**，低于
@@ -108,8 +116,7 @@ AP 评估风险排序，并同时报告精确率、召回率等指标。
 
 ### 4. 特征解释：模型依赖与解释边界
 
-[![特征解释：XGBoost
-原生重要性与匿名特征的解释边界](docs/images/dashboard-features.png)](docs/images/dashboard-features.png)
+[![特征解释：XGBoost 原生重要性与匿名特征的解释边界](./docs/images/dashboard-features.png)](./docs/images/dashboard-features.png)
 
 本次模型中，匿名特征 **V14、V10、V4**
 的原生重要性较高，金额对数特征也进入前 15
@@ -120,7 +127,7 @@ AP 评估风险排序，并同时报告精确率、召回率等指标。
 
 ### 5. AI 风控分析：把结构化报告整理成可读结论
 
-![AI 风控分析看板](docs/images/dashboard-ai.png)
+> AI 页面支持离线摘要和可选的 OpenAI-compatible 接口。README 不嵌入 AI 调用截图，避免把外部服务失败状态当作项目展示内容。
 
 AI 页面读取当前 `latest.json` 中的验证集 AP、测试集指标、复核容量、模拟成本和特征重要性，生成一段可追溯的中文摘要，并在页面底部列出使用的依据字段。截图中的结论对应当前公开信用卡实验：验证集 AP 为 0.819，测试集 AP 为 0.768，复核 176 笔、占比 0.40%，模拟成本较全部放行基线下降 64.96%。
 
