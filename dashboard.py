@@ -26,7 +26,8 @@ st.markdown(
     <style>
     :root { --navy:#102a43; --teal:#0f766e; --teal-soft:#d9f3ef; --amber:#b45309; --amber-soft:#fff3dc; --red:#b91c1c; --red-soft:#fee8e7; --ink:#172033; --muted:#64748b; --line:#d9e2ec; --canvas:#f5f8fb; }
     .stApp { background:var(--canvas); color:var(--ink); }
-    [data-testid="stHeader"] { background:rgba(245,248,251,.9); }
+    /* 隐藏 Streamlit 固定 Header，避免滚动时透出表单控件形成透明白条。 */
+    [data-testid="stHeader"] { display:none; }
     [data-testid="stSidebar"] { background:var(--navy); border-right:0; }
     [data-testid="stSidebar"] * { color:#e7eff7; }
     [data-testid="stSidebar"] [data-testid="stRadio"] label { padding:.45rem .6rem; border-radius:5px; }
