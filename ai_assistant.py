@@ -1,4 +1,4 @@
-"""基于训练报告的智能风控分析助手。
+"""读取训练报告，生成离线摘要或调用 AI 解释结果。
 
 AI 只解释已有报告，不参与模型训练、阈值搜索或风险决策。
 """
@@ -18,7 +18,7 @@ DEFAULT_TIMEOUT_SECONDS = 90.0
 
 
 def load_report(path: str | Path = DEFAULT_REPORT) -> dict[str, Any]:
-    """读取训练报告，并在入口处校验其为 JSON 对象。"""
+    """读取报告，拒绝非对象格式的 JSON。"""
     report_path = Path(path)
     if not report_path.exists():
         raise FileNotFoundError(f"找不到训练报告：{report_path}")
@@ -29,7 +29,7 @@ def load_report(path: str | Path = DEFAULT_REPORT) -> dict[str, Any]:
 
 
 def load_dotenv(path: str | Path = DEFAULT_ENV_FILE) -> dict[str, str]:
-    """读取项目 .env；只解析简单 KEY=VALUE，不覆盖系统环境变量。"""
+    """将 .env 中的 KEY=VALUE 解析为字典，不修改环境变量。"""
     env_path = Path(path)
     if not env_path.exists():
         return {}
@@ -48,16 +48,12 @@ def load_dotenv(path: str | Path = DEFAULT_ENV_FILE) -> dict[str, str]:
     return values
 
 
-def _round(value: Any, digits: int = 4) -> float | None:
-    return round(float(value), digits) if value is not None else None
-
-
 def build_context(report: Mapping[str, Any], top_features: int = 15) -> dict[str, Any]:
-    """构造有限、可审计的 AI 上下文，不放入原始交易和测试集标签。"""
+    """只选取报告汇总字段，不传原始交易或逐行标签。"""
     metrics = report.get("测试集指标", {})
     strategy = report.get("测试集冻结策略表现", {})
     selected = report.get("验证集选定策略", {})
-    context = {
+    return {
         "数据来源": report.get("数据来源"),
         "样本规模": {
             "总笔数": report.get("总笔数"),
@@ -68,31 +64,43 @@ def build_context(report: Mapping[str, Any], top_features: int = 15) -> dict[str
         "验证集选定模型": report.get("验证集选定模型"),
         "测试集指标": {
             key: metrics.get(key)
-            for key in ("平均精确率AP", "ROC-AUC", "精确率", "召回率", "F1", "真阴性", "假阳性", "假阴性", "真阳性")
+            for key in (
+                "平均精确率AP", "ROC-AUC", "精确率", "召回率", "F1",
+                "真阴性", "假阳性", "假阴性", "真阳性",
+            )
             if key in metrics
         },
         "验证集选定策略": {
             key: selected.get(key)
-            for key in ("复核阈值", "拦截阈值", "复核笔数", "拦截笔数", "复核率", "是否超出复核容量", "模拟成本")
+            for key in (
+                "复核阈值", "拦截阈值", "复核笔数", "拦截笔数",
+                "复核率", "是否超出复核容量", "模拟成本",
+            )
             if key in selected
         },
         "测试集冻结策略表现": {
             key: strategy.get(key)
-            for key in ("放行笔数", "复核笔数", "拦截笔数", "预计漏放欺诈", "预计误拦正常", "复核率", "是否超出复核容量", "模拟成本", "全部放行模拟成本", "相对全部放行成本变化")
+            for key in (
+                "放行笔数", "复核笔数", "拦截笔数", "预计漏放欺诈", "预计误拦正常",
+                "复核率", "是否超出复核容量", "模拟成本",
+                "全部放行模拟成本", "相对全部放行成本变化",
+            )
             if key in strategy
         },
         "成本假设": report.get("成本假设", {}),
         "特征工程": report.get("特征工程", []),
         "数据质量": report.get("数据质量", {}),
         "特征重要性": [
-            {"特征": item[0], "重要性": _round(item[1], 6)}
+            {
+                "特征": item[0],
+                "重要性": round(float(item[1]), 6) if item[1] is not None else None,
+            }
             for item in report.get("特征重要性", [])[:top_features]
             if isinstance(item, (list, tuple)) and len(item) == 2
         ],
         "解释方法": report.get("解释方法"),
         "风险分数说明": report.get("风险分数说明"),
     }
-    return context
 
 
 def build_messages(question: str, context: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -111,10 +119,6 @@ def build_messages(question: str, context: Mapping[str, Any]) -> list[dict[str, 
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def _format_percent(value: Any) -> str:
-    return f"{float(value):.2%}"
-
-
 def _trace(context: Mapping[str, Any], sources: list[str]) -> str:
     metrics = context["测试集指标"]
     model = context["验证集选定模型"]
@@ -126,70 +130,64 @@ def _trace(context: Mapping[str, Any], sources: list[str]) -> str:
     )
 
 
-def _question_sources(question: str) -> list[str]:
-    """根据问题主题返回应展示的报告字段。"""
+def _question_topic(question: str) -> tuple[str, list[str]]:
+    """按关键词确定主题和引用字段，离线摘要与 AI 回答使用同一套规则。"""
     text = " ".join(str(question).lower().split())
     if any(word in text for word in ("模型", "xgboost", "逻辑回归", "比较")):
-        return ["模型比较", "验证集选定模型", "时间切分"]
+        return "模型", ["模型比较", "验证集选定模型", "时间切分"]
     if any(word in text for word in ("策略", "阈值", "复核", "拦截", "容量")):
-        return ["验证集选定策略", "测试集冻结策略表现", "成本假设"]
+        return "策略", ["验证集选定策略", "测试集冻结策略表现", "成本假设"]
     if any(word in text for word in ("成本", "收益", "损失")):
-        return ["测试集冻结策略表现", "成本假设"]
+        return "成本", ["测试集冻结策略表现", "成本假设"]
     if any(word in text for word in ("特征", "解释", "v14", "pca", "匿名")):
-        return ["特征重要性", "解释方法", "风险分数说明"]
+        return "特征", ["特征重要性", "解释方法", "风险分数说明"]
     if any(word in text for word in ("指标", "效果", "ap", "auc", "召回", "精确", "f1")):
-        return ["测试集指标", "样本规模"]
-    return ["数据来源", "样本规模", "验证集选定模型", "测试集指标"]
+        return "指标", ["测试集指标", "样本规模"]
+    return "概览", ["数据来源", "样本规模", "验证集选定模型", "测试集指标"]
 
 
 def offline_answer(question: str, report: Mapping[str, Any]) -> dict[str, Any]:
-    """在无模型服务时生成确定性的中文报告摘要。"""
+    """按问题主题整理报告摘要，无需调用模型服务。"""
     context = build_context(report)
-    text = " ".join(str(question).lower().split())
+    topic, sources = _question_topic(question)
     metrics = context["测试集指标"]
     strategy = context["测试集冻结策略表现"]
-    sources = ["测试集指标", "验证集选定模型"]
-    if any(word in text for word in ("模型", "xgboost", "逻辑回归", "比较")):
+    if topic == "模型":
         comparison = context["模型比较"]
         answer = (
             f"**报告事实**：验证集 AP 比较为 {comparison[0]['模型']}={comparison[0]['验证集AP']:.4f}、"
             f"{comparison[1]['模型']}={comparison[1]['验证集AP']:.4f}，因此选定{context['验证集选定模型']}。"
             "\n\n**解释**：验证集只用于选模型，测试集指标来自之后的时间段；这能降低用测试集反复调参的风险。"
         )
-        sources = ["模型比较", "验证集选定模型", "时间切分"]
-    elif any(word in text for word in ("策略", "阈值", "复核", "拦截", "容量")):
+    elif topic == "策略":
         capacity = context["成本假设"]["最大复核比例"]
         answer = (
             f"**报告事实**：测试集放行{strategy['放行笔数']:,}笔、复核{strategy['复核笔数']:,}笔、"
-            f"拦截{strategy['拦截笔数']:,}笔；复核率为{_format_percent(strategy['复核率'])}，容量上限为{capacity:.0%}，"
+            f"拦截{strategy['拦截笔数']:,}笔；复核率为{float(strategy['复核率']):.2%}，容量上限为{capacity:.0%}，"
             f"状态为{'已超出' if strategy['是否超出复核容量'] else '未超出'}。"
             "\n\n**解释**：阈值在验证集确定后冻结，测试集没有重新调阈值，因此后续时段不一定出现三类动作。"
         )
-        sources = ["验证集选定策略", "测试集冻结策略表现", "成本假设"]
-    elif any(word in text for word in ("成本", "收益", "损失")):
+    elif topic == "成本":
         change = strategy.get("相对全部放行成本变化")
         answer = (
             f"**报告事实**：冻结策略模拟成本为{strategy['模拟成本']:,.2f}，全部放行为"
             f"{strategy['全部放行模拟成本']:,.2f}，相对变化为{change:.2%}。"
             "\n\n**限制**：漏放、误拦、复核成本和复核效果均为离线假设，不能直接解释为线上收益。"
         )
-        sources = ["测试集冻结策略表现", "成本假设"]
-    elif any(word in text for word in ("特征", "解释", "v14", "pca", "匿名")):
+    elif topic == "特征":
         top = context["特征重要性"][:3]
         names = "、".join(item["特征"] for item in top)
         answer = (
             f"**报告事实**：当前模型原生重要性较高的特征包括 {names}。"
             "\n\n**限制**：V1-V28 是 PCA 后的匿名特征，重要性表示模型使用程度，不能还原成设备、商户、地域或因果原因。"
         )
-        sources = ["特征重要性", "解释方法", "风险分数说明"]
-    elif any(word in text for word in ("指标", "效果", "ap", "auc", "召回", "精确", "f1")):
+    elif topic == "指标":
         answer = (
             f"**报告事实**：测试集 AP={metrics['平均精确率AP']:.4f}、ROC-AUC={metrics['ROC-AUC']:.4f}、"
             f"精确率={metrics['精确率']:.4f}、召回率={metrics['召回率']:.4f}、F1={metrics['F1']:.4f}。"
             f"混淆矩阵为 TN={metrics['真阴性']}、FP={metrics['假阳性']}、FN={metrics['假阴性']}、TP={metrics['真阳性']}。"
             "\n\n**解释**：极度不平衡任务优先观察 AP、精确率和召回率，不能只看准确率。"
         )
-        sources = ["测试集指标", "样本规模"]
     else:
         answer = (
             f"**报告事实**：项目使用{context['数据来源']}，共{context['样本规模']['总笔数']:,}笔交易，"
@@ -197,11 +195,15 @@ def offline_answer(question: str, report: Mapping[str, Any]) -> dict[str, Any]:
             f"测试集 AP 为{metrics['平均精确率AP']:.4f}。"
             "\n\n**建议**：可以继续询问模型比较、测试集指标、风险策略、成本或特征解释。"
         )
-        sources = ["数据来源", "样本规模", "验证集选定模型", "测试集指标"]
     return {"mode": "offline", "answer": answer + _trace(context, sources), "sources": sources}
 
 
-def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> dict[str, Any]:
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+) -> dict[str, Any]:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = request.Request(url, data=body, headers=headers, method="POST")
     with request.urlopen(req, timeout=timeout) as response:
@@ -209,7 +211,7 @@ def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeo
 
 
 def request_timeout(environ: Mapping[str, str]) -> float:
-    """读取 AI 请求超时，避免推理模型默认 20 秒过早失败。"""
+    """读取请求超时，并限制在 10～300 秒。"""
     raw = str(environ.get("AI_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)).strip()
     try:
         value = float(raw)
@@ -241,7 +243,9 @@ def normalize_answer(text: str) -> str:
     lines = str(text).splitlines()
     cleaned: list[str] = []
     skip_field_list = False
-    field_heading = re.compile(r"^\s{0,3}(?:#{1,6}\s*)?(?:\*\*)?使用的报告字段(?:\*\*)?\s*[:：]?(.*)$")
+    field_heading = re.compile(
+        r"^\s{0,3}(?:#{1,6}\s*)?(?:\*\*)?使用的报告字段(?:\*\*)?\s*[:：]?(.*)$"
+    )
     any_heading = re.compile(r"^\s{0,3}#{1,6}\s+")
     for line in lines:
         match = field_heading.match(line)
@@ -279,12 +283,17 @@ def answer_question(
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    payload = {"model": model, "messages": build_messages(question, context), "temperature": 0.1}
+    payload = {
+        "model": model,
+        "messages": build_messages(question, context),
+        "temperature": 0.1,
+    }
     send = transport or _post_json
     try:
         response = send(url, payload, headers, request_timeout(env))
         answer = normalize_answer(_message_content(response))
-        sources = ["报告上下文", *_question_sources(question)]
+        _, sources = _question_topic(question)
+        sources = ["报告上下文", *sources]
         return {"mode": "ai", "answer": answer + _trace(context, sources), "sources": sources}
     except Exception as exc:
         fallback = offline_answer(question, loaded_report)

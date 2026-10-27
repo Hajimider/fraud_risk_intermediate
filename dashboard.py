@@ -1,8 +1,8 @@
 """交易反欺诈数据挖掘与风险决策工作台。"""
 from __future__ import annotations
 
-import json
 import html
+import json
 from pathlib import Path
 
 import altair as alt
@@ -37,7 +37,10 @@ st.markdown(
     [data-testid="stMetric"] { background:#fff; border:1px solid var(--line); border-radius:6px; padding:1rem 1.1rem; box-shadow:0 2px 8px rgba(16,42,67,.04); }
     [data-testid="stMetricLabel"] { color:var(--muted); font-size:.78rem; }
     [data-testid="stMetricValue"] { color:var(--navy); font-variant-numeric:tabular-nums; }
-    div[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--line); border-radius:6px; background:#fff; }
+    div[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--line); border-radius:6px; background:#fff; box-sizing:border-box; max-width:100%; min-width:0; overflow:hidden; }
+    [data-testid="stHorizontalBlock"], [data-testid="column"] { min-width:0 !important; max-width:100% !important; }
+    [data-testid="column"] { overflow:hidden; }
+    [data-testid="stMarkdownContainer"] { min-width:0; max-width:100%; }
     .brand { padding:.6rem .25rem 1.6rem; }
     .brand-mark { width:54px; height:36px; display:inline-flex; align-items:center; justify-content:center; background:#e7eff7; color:var(--navy); border-radius:6px; font-weight:800; margin-bottom:.75rem; font-size:.84rem; }
     .brand-title { font-size:1.05rem; font-weight:700; line-height:1.35; }
@@ -63,13 +66,16 @@ st.markdown(
     [data-testid="stSelectbox"] [data-baseweb="select"] *,
     [data-testid="stTextArea"] textarea::placeholder { color:var(--ink) !important; }
     [data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#fff; }
-    .data-table-wrap { width:100%; overflow-x:auto; border:1px solid #d9e2ec; border-radius:6px; background:#fff; }
-    table.risk-table { width:100%; border-collapse:collapse; color:#172033; background:#fff; font-size:.88rem; }
-    table.risk-table thead th { background:#e7eff7; color:#102a43; font-weight:700; text-align:left; padding:.72rem .82rem; border-bottom:1px solid #c7d9e8; white-space:nowrap; }
-    table.risk-table tbody td { background:#fff; color:#172033; padding:.68rem .82rem; border-bottom:1px solid #e5edf4; }
+    [data-testid="stVegaLiteChart"] { width:100% !important; max-width:100% !important; overflow:hidden; }
+    [data-testid="stVegaLiteChart"] > div, [data-testid="stVegaLiteChart"] svg { max-width:100% !important; }
+    [data-testid="stMarkdownContainer"]:has(.data-table-wrap) { margin-bottom:0 !important; }
+    .data-table-wrap { width:100%; max-width:100%; min-width:0; box-sizing:border-box; overflow-x:auto; overflow-y:hidden; margin:0 auto; border:1px solid #d9e2ec; border-radius:6px; background:#fff; }
+    table.risk-table { width:100%; max-width:none; min-width:100%; box-sizing:border-box; table-layout:auto; border-collapse:collapse; color:#172033; background:#fff; font-size:.88rem; }
+    table.risk-table thead th { background:#e7eff7; color:#102a43; font-weight:700; text-align:left; padding:.72rem .82rem; border-bottom:1px solid #c7d9e8; white-space:normal; overflow-wrap:normal; }
+    table.risk-table tbody td { background:#fff; color:#172033; padding:.68rem .82rem; border-bottom:1px solid #e5edf4; overflow-wrap:normal; }
     table.risk-table tbody tr:nth-child(even) td { background:#f5f9fc; }
     table.risk-table tbody tr:last-child td { border-bottom:0; }
-    table.risk-table td.numeric { text-align:right; font-variant-numeric:tabular-nums; }
+    table.risk-table td.numeric { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
     table.risk-table td.state-ok { color:#146356; background:#e0f2ee !important; font-weight:700; }
     table.risk-table td.state-alert { color:#8e1f1f; background:#fee8e7 !important; font-weight:700; }
     .st-key-ai-answer [data-testid="stMarkdownContainer"] { color:#172033; font-family:inherit; font-size:.94rem; line-height:1.72; }
@@ -94,10 +100,6 @@ st.markdown(
 )
 
 
-def pct(value: float) -> str:
-    return f"{float(value):.2%}"
-
-
 def num(value: float, digits: int = 4) -> str:
     return f"{float(value):.{digits}f}"
 
@@ -107,7 +109,12 @@ def status_html(label: str, tone: str = "blue") -> str:
 
 
 def page_header(kicker: str, title: str, subtitle: str) -> None:
-    st.markdown(f'<div class="eyebrow">{kicker}</div><h1 class="page-title">{title}</h1><p class="page-subtitle">{subtitle}</p>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="eyebrow">{kicker}</div>'
+        f'<h1 class="page-title">{title}</h1>'
+        f'<p class="page-subtitle">{subtitle}</p>',
+        unsafe_allow_html=True,
+    )
 
 
 def panel_title(title: str, note: str | None = None) -> None:
@@ -116,16 +123,13 @@ def panel_title(title: str, note: str | None = None) -> None:
         st.caption(note)
 
 
-def show_table(frame: pd.DataFrame, *, hide_index: bool = True) -> None:
-    """使用主题明确的 HTML 表格，绕开系统深色主题对 Styler 的覆盖。"""
-    table = frame.copy()
-    if not hide_index:
-        table.insert(0, "序号", table.index)
-    headers = "".join(f"<th>{column}</th>" for column in table.columns)
+def show_table(frame: pd.DataFrame) -> None:
+    """渲染浅色表格，避免系统深色主题覆盖表格配色。"""
+    headers = "".join(f"<th>{column}</th>" for column in frame.columns)
     rows = []
-    for values in table.itertuples(index=False, name=None):
+    for values in frame.itertuples(index=False, name=None):
         cells = []
-        for column, value in zip(table.columns, values):
+        for column, value in zip(frame.columns, values):
             if pd.isna(value):
                 display = "-"
             elif isinstance(value, float):
@@ -140,52 +144,83 @@ def show_table(frame: pd.DataFrame, *, hide_index: bool = True) -> None:
                 css_class = "state-ok" if display == "未超出" else "state-alert"
             cells.append(f'<td class="{css_class}">{safe_value}</td>')
         rows.append("<tr>" + "".join(cells) + "</tr>")
-    markup = f'<div class="data-table-wrap"><table class="risk-table"><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+    markup = (
+        '<div class="data-table-wrap"><table class="risk-table">'
+        f'<thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody>'
+        '</table></div>'
+    )
     st.markdown(markup, unsafe_allow_html=True)
 
 
 def chart_base(chart: alt.Chart, height: int = 260) -> alt.Chart:
-    return chart.properties(height=height, background="#ffffff", padding={"left": 8, "right": 16, "top": 10, "bottom": 6}).configure(
-        background="#ffffff",
-        font="Arial, Microsoft YaHei, sans-serif",
-    ).configure_view(stroke="#e5edf4", fill="#ffffff").configure_axis(
-        labelColor="#52667a", titleColor="#52667a", gridColor="#e2eaf1", domainColor="#c7d9e8",
-        tickColor="#c7d9e8", labelFontSize=11, titleFontSize=11, gridOpacity=0.75,
-    ).configure_title(color="#102a43", fontSize=13, anchor="start").configure_legend(
-        labelColor="#52667a", titleColor="#102a43", orient="top",
+    return (
+        chart.properties(
+            height=height,
+            background="#ffffff",
+            padding={"left": 8, "right": 16, "top": 10, "bottom": 6},
+        )
+        .configure(background="#ffffff", font="Arial, Microsoft YaHei, sans-serif")
+        .configure_view(stroke="#e5edf4", fill="#ffffff")
+        .configure_axis(
+            labelColor="#52667a", titleColor="#52667a", gridColor="#e2eaf1",
+            domainColor="#c7d9e8", tickColor="#c7d9e8",
+            labelFontSize=11, titleFontSize=11, gridOpacity=0.75,
+        )
+        .configure_title(color="#102a43", fontSize=13, anchor="start")
+        .configure_legend(labelColor="#52667a", titleColor="#102a43", orient="top")
     )
 
 
 def risk_distribution_chart(scores: pd.DataFrame) -> alt.Chart:
-    data = scores.assign(风险分数分箱=pd.cut(scores["风险分数"], bins=10).astype(str)).groupby("风险分数分箱", observed=True).size().reset_index(name="交易笔数")
+    data = (
+        scores.assign(风险分数分箱=pd.cut(scores["风险分数"], bins=10).astype(str))
+        .groupby("风险分数分箱", observed=True)
+        .size()
+        .reset_index(name="交易笔数")
+    )
     return chart_base(
         alt.Chart(data).mark_bar(color="#0f766e", cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
             x=alt.X("风险分数分箱:N", sort=None, axis=alt.Axis(title="风险分数区间", labelAngle=-35)),
             y=alt.Y("交易笔数:Q", axis=alt.Axis(title="交易笔数")),
-            tooltip=[alt.Tooltip("风险分数分箱:N", title="风险区间"), alt.Tooltip("交易笔数:Q", title="交易笔数", format=",")],
-        ), 260,
+            tooltip=[
+                alt.Tooltip("风险分数分箱:N", title="风险区间"),
+                alt.Tooltip("交易笔数:Q", title="交易笔数", format=","),
+            ],
+        ),
+        260,
     )
 
 
 def hourly_chart(profile: pd.DataFrame, field: str, color: str, title: str) -> alt.Chart:
     data = profile[["相对小时", field]].rename(columns={field: "数值"})
     return chart_base(
-        alt.Chart(data).mark_line(color=color, strokeWidth=3, point=alt.OverlayMarkDef(color=color, size=45)).encode(
+        alt.Chart(data).mark_line(
+            color=color, strokeWidth=3,
+            point=alt.OverlayMarkDef(color=color, size=45),
+        ).encode(
             x=alt.X("相对小时:Q", axis=alt.Axis(title="相对小时")),
             y=alt.Y("数值:Q", axis=alt.Axis(title=title, format=".2%" if "比例" in title else ",.0f")),
-            tooltip=[alt.Tooltip("相对小时:Q", title="相对小时"), alt.Tooltip("数值:Q", title=title, format=".2%" if "比例" in title else ",.2f")],
-        ), 220,
+            tooltip=[
+                alt.Tooltip("相对小时:Q", title="相对小时"),
+                alt.Tooltip("数值:Q", title=title, format=".2%" if "比例" in title else ",.2f"),
+            ],
+        ),
+        220,
     )
 
 
 def feature_chart(importance: pd.DataFrame) -> alt.Chart:
-    data = importance.sort_values("重要性", ascending=True).copy()
+    data = importance.sort_values("重要性", ascending=True)
     return chart_base(
         alt.Chart(data).mark_bar(color="#2563eb", cornerRadiusEnd=4).encode(
             x=alt.X("重要性:Q", axis=alt.Axis(title="模型重要性", format=".3f")),
             y=alt.Y("特征:N", sort=None, axis=alt.Axis(title=None, labelLimit=150)),
-            tooltip=[alt.Tooltip("特征:N", title="特征"), alt.Tooltip("重要性:Q", title="重要性", format=".4f")],
-        ), 430,
+            tooltip=[
+                alt.Tooltip("特征:N", title="特征"),
+                alt.Tooltip("重要性:Q", title="重要性", format=".4f"),
+            ],
+        ),
+        430,
     )
 
 
@@ -210,15 +245,20 @@ def show_overview(report: dict, metrics: dict, scores: pd.DataFrame, profile: pd
         st.markdown('<div class="small-note">测试集只用于冻结后的最终评估，未重新搜索阈值。模拟成本和匿名特征解释均有明确边界。</div>', unsafe_allow_html=True)
     st.write("")
     cols = st.columns(4)
-    for col, label, value in zip(cols, ["交易总数", "欺诈笔数", "测试集 AP", "测试集 ROC-AUC"], [f"{report['总笔数']:,}", f"{report['欺诈笔数']:,}", num(metrics['平均精确率AP']), num(metrics['ROC-AUC'])]):
+    summaries = [
+        ("交易总数", f"{report['总笔数']:,}"),
+        ("欺诈笔数", f"{report['欺诈笔数']:,}"),
+        ("测试集 AP", num(metrics["平均精确率AP"])),
+        ("测试集 ROC-AUC", num(metrics["ROC-AUC"])),
+    ]
+    for col, (label, value) in zip(cols, summaries):
         with col:
             st.metric(label, value)
     left, right = st.columns([1.05, 1.35])
     with left:
         with st.container(border=True):
             panel_title("数据切分", "按交易时间顺序划分，避免未来信息进入训练")
-            split = pd.DataFrame([report["时间切分"]]).T.reset_index()
-            split.columns = ["数据集", "交易笔数"]
+            split = pd.DataFrame(report["时间切分"].items(), columns=["数据集", "交易笔数"])
             split["数据集"] = split["数据集"].replace({"训练集": "训练", "验证集": "验证", "测试集": "测试"})
             show_table(split)
             st.markdown('<div class="small-note">衍生特征：' + "、".join(report["特征工程"]) + '</div>', unsafe_allow_html=True)
@@ -273,7 +313,13 @@ def show_policy(report: dict) -> None:
     final = report["测试集冻结策略表现"]
     capacity = report["成本假设"]["最大复核比例"]
     cols = st.columns(4)
-    for col, label, value in zip(cols, ["复核阈值", "拦截阈值", "测试集复核率", "测试集模拟成本"], [num(selected["复核阈值"], 5), num(selected["拦截阈值"], 5), pct(final["复核率"]), f"{final['模拟成本']:,.2f}"]):
+    summaries = [
+        ("复核阈值", num(selected["复核阈值"], 5)),
+        ("拦截阈值", num(selected["拦截阈值"], 5)),
+        ("测试集复核率", f"{float(final['复核率']):.2%}"),
+        ("测试集模拟成本", f"{final['模拟成本']:,.2f}"),
+    ]
+    for col, (label, value) in zip(cols, summaries):
         with col:
             st.metric(label, value)
     state = "已超出" if final["是否超出复核容量"] else "未超出"
@@ -282,24 +328,25 @@ def show_policy(report: dict) -> None:
         usage = min(final["复核率"] / capacity, 1.0) if capacity else 0.0
         st.progress(usage, text=f"容量使用率 {usage:.0%}" if capacity else "容量上限未设置")
         st.markdown(f'<div class="status-bar">{status_html("复核容量 " + state, "red" if final["是否超出复核容量"] else "green")}{status_html("测试集不重新调阈值", "blue")}</div>', unsafe_allow_html=True)
-    left, right = st.columns(2)
-    with left:
-        with st.container(border=True):
-            panel_title("验证集选定策略")
-            show_table(policy_table(selected, report["时间切分"]["验证集"], capacity))
-    with right:
-        with st.container(border=True):
-            panel_title("测试集冻结策略")
-            show_table(policy_table(final, report["时间切分"]["测试集"], capacity))
+    with st.container(border=True):
+        panel_title("验证集选定策略", "策略搜索阶段的放行、复核和拦截结果")
+        show_table(policy_table(selected, report["时间切分"]["验证集"], capacity))
+    with st.container(border=True):
+        panel_title("测试集冻结策略", "冻结阈值在测试集上的最终处置结果")
+        show_table(policy_table(final, report["时间切分"]["测试集"], capacity))
     with st.container(border=True):
         panel_title("成本假设", "漏放、误拦和人工复核成本均为离线模拟口径")
-        show_table(pd.DataFrame([{"成本参数": key, "数值": value} for key, value in report["成本假设"].items()]))
+        show_table(pd.DataFrame(report["成本假设"].items(), columns=["成本参数", "数值"]))
 
 
 def show_explain(report: dict) -> None:
     page_header("模型解释", "特征重要性与解释边界", "展示模型使用程度，不把匿名变量解释成真实业务因果")
     importance = pd.DataFrame(report["特征重要性"], columns=["特征", "重要性"])
-    importance["特征"] = importance["特征"].replace({"Amount": "交易金额", "LogAmount": "金额对数", **{f"V{i}": f"匿名特征{i}" for i in range(1, 29)}})
+    importance["特征"] = importance["特征"].replace({
+        "Amount": "交易金额",
+        "LogAmount": "金额对数",
+        **{f"V{i}": f"匿名特征{i}" for i in range(1, 29)},
+    })
     with st.container(border=True):
         panel_title("全局特征重要性")
         st.altair_chart(feature_chart(importance), width="stretch")
@@ -319,7 +366,13 @@ def show_ai(report: dict) -> None:
             st.markdown(f'<p class="finding">{env["AI_MODEL"]}</p><div class="small-note">接口：{env["AI_BASE_URL"]} · 等待上限：{request_timeout(env):.0f} 秒 · API Key 已设置</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="callout callout-warning">尚未配置完整 AI 服务。当前仍可使用离线中文摘要；请在项目根目录 .env 填写 AI_BASE_URL、AI_MODEL 和 AI_API_KEY。</div>', unsafe_allow_html=True)
-    examples = ["为什么验证集选择 XGBoost？", "测试集指标说明了什么？", "复核容量是否超出？", "模拟成本下降代表线上收益吗？", "匿名特征重要性可以解释成设备或商户吗？"]
+    examples = [
+        "为什么验证集选择 XGBoost？",
+        "测试集指标说明了什么？",
+        "复核容量是否超出？",
+        "模拟成本下降代表线上收益吗？",
+        "匿名特征重要性可以解释成设备或商户吗？",
+    ]
     question = st.selectbox("示例问题", examples)
     question = st.text_area("问题", value=question, height=90, label_visibility="collapsed")
     if st.button("生成分析", type="primary", key="ai_submit"):
@@ -350,7 +403,10 @@ profile = pd.read_csv(ROOT / "reports" / "hour_profile.csv")
 
 with st.sidebar:
     st.markdown('<div class="brand"><div class="brand-mark">风险分析</div><div class="brand-title">反欺诈风险工作台</div><div class="brand-subtitle">数据挖掘 · 模型评估 · 成本策略</div></div>', unsafe_allow_html=True)
-    nav = st.radio("工作区", ["数据概览", "模型比较", "风险策略", "特征解释", "AI 风控分析"], label_visibility="collapsed")
+    nav = st.radio(
+        "工作区", ["数据概览", "模型比较", "风险策略", "特征解释", "AI 风控分析"],
+        label_visibility="collapsed",
+    )
     st.divider()
     source = "教学样本" if report["数据来源"] == "合成教学数据" else "公开信用卡样本"
     st.caption(f"数据源：{source}")
