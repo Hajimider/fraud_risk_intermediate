@@ -133,7 +133,12 @@ AI 页面读取当前 `latest.json` 中的验证集 AP、测试集指标、复�
 -   公开信用卡 CSV（训练时需要）
 -   不配置 AI 服务也可以运行看板和离线摘要
 
-> **Streamlit Cloud 部署提示：** 主文件选择 `dashboard.py`。本地开发和验证使用 Python 3.10；部署时请在 **Advanced settings → Python version** 中选择版本，若平台仍提供 3.10，优先与本地保持一致；若不提供，可选 3.11，但应在云端重新验证。`runtime.txt` 不能保证 Community Cloud 切换解释器版本；已有应用需要更换 Python 版本时，应重新部署并选择版本，仅点击 **Reboot app** 不会更换解释器。`requirements.txt` 当前固定 Altair 5.4.1；此前本地测试实际使用 Altair 6.2.2，尚不能据此宣称该依赖组合已通过云端验证。
+### Streamlit Community Cloud 部署
+
+- 主文件选择 `dashboard.py`。提交 `requirements.txt` 和 `reports/` 下已纳入版本控制的示例报告，看板即可读取报告展示结果。
+- 图表依赖固定为 `altair==6.2.2` 和 `streamlit==1.61.1`，与本地验证版本一致。不要改成 Altair 5.4.1：该版本被此版本的 Streamlit 明确排除，会导致安装失败和依赖解析长时间回溯。
+- 本地开发环境为 Python 3.10。云端版本在 **Advanced settings → Python version** 中选择；更换已有应用的 Python 版本需重新部署，`runtime.txt` 或 **Reboot app** 不能代替该操作。
+- 更新 GitHub 中的依赖文件后，在 Cloud 查看新的构建日志；需要重试构建时点击 **Reboot app**。依赖安装成功后才会启动页面，本地通过不代表云端已经部署成功。
 
 以下命令均在项目根目录执行。
 

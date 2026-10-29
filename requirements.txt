@@ -1,7 +1,7 @@
 pandas>=2.0,<3
-altair==5.4.1
+altair==6.2.2
 scikit-learn>=1.4,<2
 xgboost>=2.0,<4
 matplotlib>=3.7,<4
-streamlit>=1.57,<2
+streamlit==1.61.1
 pytest>=8,<10
