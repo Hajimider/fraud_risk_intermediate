@@ -1,38 +1,64 @@
+# Python 缓存与测试产物
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 
-# Local configuration and secrets
+# 本地环境、密钥和编辑器设置
+.venv/
+venv/
+env/
 .env
 .env.*
 !.env.example
+/.streamlit/*
+!/.streamlit/config.toml
+!/.streamlit/secrets.toml.example
 .vscode/
 .idea/
+.codex/
+.agents/
 
-# Original datasets are downloaded locally from the documented source
-data/*.csv
-data/*.parquet
-data/*.xlsx
+# 原始数据与下载压缩包；保留数据来源说明
+data/**/*.csv
+data/**/*.parquet
+data/**/*.xlsx
+data/**/*.zip
+data/**/*.7z
 
-# Keep the small, representative report used by the README; ignore old runs
-reports/*
-!reports/.gitkeep
-!reports/latest.json
-!reports/test_scores.csv
-!reports/hour_profile.csv
+# 只提交看板必需的三份报告，排除实验备份和验收截图
+/reports/*
+!/reports/.gitkeep
+!/reports/latest.json
+!/reports/test_scores.csv
+!/reports/hour_profile.csv
 
-# Logs and temporary files
+# 日志、备份和临时文件
+logs/
 *.log
 *.tmp
+*.temp
 *.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*~
 Thumbs.db
+.DS_Store
 
-# Local test snapshots and one-off debugging scripts
-.pytest-tmp-*/
-001.py
-progress.md
+# 本地调试和内部记录
+.pytest-tmp*/
+/001.py
+/progress.md
+/task_plan.md
+/findings.md
+/docs/superpowers/
 
-# Internal planning artifacts are not part of the runnable portfolio project
-docs/superpowers/
+# docs/images/ 中的 README 展示图需要正常提交，不忽略图片。

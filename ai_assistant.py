@@ -15,6 +15,7 @@ DEFAULT_REPORT = Path(__file__).resolve().parent / "reports" / "latest.json"
 DEFAULT_ENV_FILE = Path(__file__).resolve().parent / ".env"
 MAX_QUESTION_LENGTH = 500
 DEFAULT_TIMEOUT_SECONDS = 90.0
+AI_CONFIG_KEYS = ("AI_BASE_URL", "AI_MODEL", "AI_API_KEY", "AI_TIMEOUT_SECONDS")
 
 
 def load_report(path: str | Path = DEFAULT_REPORT) -> dict[str, Any]:
@@ -46,6 +47,25 @@ def load_dotenv(path: str | Path = DEFAULT_ENV_FILE) -> dict[str, str]:
             value = value[1:-1]
         values[key] = value
     return values
+
+
+def load_ai_config(
+    environ: Mapping[str, str] | None = None,
+    secrets: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """优先读取 Secrets，其次环境变量，最后读取本地 .env。"""
+    values = {**load_dotenv(), **os.environ} if environ is None else dict(environ)
+    if secrets is not None:
+        values.update({key: secrets[key] for key in AI_CONFIG_KEYS if key in secrets})
+    config = {key: str(values.get(key, "")).strip() for key in AI_CONFIG_KEYS}
+    config["AI_BASE_URL"] = config["AI_BASE_URL"].rstrip("/")
+    if (
+        config["AI_BASE_URL"].startswith("https://your-compatible-endpoint")
+        or config["AI_MODEL"] == "your-model-name"
+    ):
+        for key in ("AI_BASE_URL", "AI_MODEL", "AI_API_KEY"):
+            config[key] = ""
+    return config
 
 
 def build_context(report: Mapping[str, Any], top_features: int = 15) -> dict[str, Any]:
@@ -109,10 +129,11 @@ def build_messages(question: str, context: Mapping[str, Any]) -> list[dict[str, 
     context_text = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
     system = (
         "你是数据挖掘项目中的风控分析助手。只能依据用户提供的结构化报告回答，"
-        "不能编造报告没有的数字。回答使用中文，分成‘报告事实’、‘解释’和‘限制或建议’；"
-        "明确区分模型指标、成本假设和业务建议。V1-V28 是匿名 PCA 特征，不能解释成设备、商户或地域。"
+        "不能编造报告没有的数字。用中文直接回答问题，引用相关数值并解释其含义，"
+        "按内容需要分段或列要点，不必套用固定的章节格式。区分模型指标、成本假设和业务建议。"
+        "V1-V28 是匿名 PCA 特征，不能解释成设备、商户或地域。"
         "风险分数未校准时称为风险排序分数，不称为欺诈概率。不要执行训练、改阈值、导出原始交易或调用其他工具。"
-        "使用 Markdown 时只用三级标题（###）标记‘报告事实’、‘解释’、‘限制或建议’，不要使用一级或二级大标题。"
+        "如需 Markdown 标题，只使用三级标题（###），避免大标题影响页面排版。"
         "不要在正文中另列‘使用的报告字段’，页面会单独展示报告依据。"
     )
     user = f"报告上下文：{context_text}\n\n用户问题：{clean_question}"
@@ -123,10 +144,10 @@ def _trace(context: Mapping[str, Any], sources: list[str]) -> str:
     metrics = context["测试集指标"]
     model = context["验证集选定模型"]
     return (
-        "\n\n**报告依据**："
-        f"选定模型={model}；测试集 AP={float(metrics['平均精确率AP']):.4f}；"
-        f"ROC-AUC={float(metrics['ROC-AUC']):.4f}。"
-        f"使用字段：{'、'.join(sources)}。"
+        "\n\n报告记录："
+        f"选定模型为 {model}，测试集 AP 为 {float(metrics['平均精确率AP']):.4f}，"
+        f"ROC-AUC 为 {float(metrics['ROC-AUC']):.4f}。"
+        f"参考字段：{'、'.join(sources)}。"
     )
 
 
@@ -155,45 +176,45 @@ def offline_answer(question: str, report: Mapping[str, Any]) -> dict[str, Any]:
     if topic == "模型":
         comparison = context["模型比较"]
         answer = (
-            f"**报告事实**：验证集 AP 比较为 {comparison[0]['模型']}={comparison[0]['验证集AP']:.4f}、"
-            f"{comparison[1]['模型']}={comparison[1]['验证集AP']:.4f}，因此选定{context['验证集选定模型']}。"
-            "\n\n**解释**：验证集只用于选模型，测试集指标来自之后的时间段；这能降低用测试集反复调参的风险。"
+            f"验证集上，{comparison[0]['模型']} 的 AP 为 {comparison[0]['验证集AP']:.4f}，"
+            f"{comparison[1]['模型']} 为 {comparison[1]['验证集AP']:.4f}，因此选定 {context['验证集选定模型']}。"
+            "\n\n模型和策略阈值都在验证集上确定，测试集来自后续时间段。当前比较基于一次时间切分，还需更多时间窗口检验。"
         )
     elif topic == "策略":
         capacity = context["成本假设"]["最大复核比例"]
         answer = (
-            f"**报告事实**：测试集放行{strategy['放行笔数']:,}笔、复核{strategy['复核笔数']:,}笔、"
+            f"测试集放行{strategy['放行笔数']:,}笔、复核{strategy['复核笔数']:,}笔、"
             f"拦截{strategy['拦截笔数']:,}笔；复核率为{float(strategy['复核率']):.2%}，容量上限为{capacity:.0%}，"
             f"状态为{'已超出' if strategy['是否超出复核容量'] else '未超出'}。"
-            "\n\n**解释**：阈值在验证集确定后冻结，测试集没有重新调阈值，因此后续时段不一定出现三类动作。"
+            "\n\n阈值在验证集确定后冻结。后续时段的分数分布可能变化，不保证三类动作都会出现，也不保证始终满足容量上限。"
         )
     elif topic == "成本":
         change = strategy.get("相对全部放行成本变化")
         answer = (
-            f"**报告事实**：冻结策略模拟成本为{strategy['模拟成本']:,.2f}，全部放行为"
+            f"冻结策略模拟成本为{strategy['模拟成本']:,.2f}，全部放行为"
             f"{strategy['全部放行模拟成本']:,.2f}，相对变化为{change:.2%}。"
-            "\n\n**限制**：漏放、误拦、复核成本和复核效果均为离线假设，不能直接解释为线上收益。"
+            "\n\n这项变化是按设定费用和复核效果计算的，比较对象为全部放行，不能据此推算线上收益。"
         )
     elif topic == "特征":
         top = context["特征重要性"][:3]
         names = "、".join(item["特征"] for item in top)
         answer = (
-            f"**报告事实**：当前模型原生重要性较高的特征包括 {names}。"
-            "\n\n**限制**：V1-V28 是 PCA 后的匿名特征，重要性表示模型使用程度，不能还原成设备、商户、地域或因果原因。"
+            f"当前模型重要性较高的特征包括 {names}。"
+            "\n\nV1-V28 是 PCA 转换后的匿名特征，无法还原成设备、商户或地域。重要性反映模型对变量的使用程度，不说明欺诈原因。"
         )
     elif topic == "指标":
         answer = (
-            f"**报告事实**：测试集 AP={metrics['平均精确率AP']:.4f}、ROC-AUC={metrics['ROC-AUC']:.4f}、"
+            f"测试集 AP={metrics['平均精确率AP']:.4f}、ROC-AUC={metrics['ROC-AUC']:.4f}、"
             f"精确率={metrics['精确率']:.4f}、召回率={metrics['召回率']:.4f}、F1={metrics['F1']:.4f}。"
             f"混淆矩阵为 TN={metrics['真阴性']}、FP={metrics['假阳性']}、FN={metrics['假阴性']}、TP={metrics['真阳性']}。"
-            "\n\n**解释**：极度不平衡任务优先观察 AP、精确率和召回率，不能只看准确率。"
+            "\n\n欺诈样本很少，准确率容易掩盖漏报。AP 用于观察排序质量，精确率和召回率则反映当前分类阈值下的误报与漏报。风险分数未经概率校准。"
         )
     else:
         answer = (
-            f"**报告事实**：项目使用{context['数据来源']}，共{context['样本规模']['总笔数']:,}笔交易，"
+            f"项目使用{context['数据来源']}，共{context['样本规模']['总笔数']:,}笔交易，"
             f"欺诈{context['样本规模']['欺诈笔数']:,}笔；验证集选定{context['验证集选定模型']}，"
             f"测试集 AP 为{metrics['平均精确率AP']:.4f}。"
-            "\n\n**建议**：可以继续询问模型比较、测试集指标、风险策略、成本或特征解释。"
+            "\n\n可以继续查看模型比较、测试集指标、复核策略、模拟成本或特征重要性。"
         )
     return {"mode": "offline", "answer": answer + _trace(context, sources), "sources": sources}
 
@@ -271,12 +292,10 @@ def answer_question(
     """回答问题；没有完整 AI 配置或调用失败时自动回退离线摘要。"""
     loaded_report = dict(report) if report is not None else load_report(report_path)
     context = build_context(loaded_report)
-    env = {**load_dotenv(), **os.environ} if environ is None else environ
-    base_url = env.get("AI_BASE_URL", "").strip().rstrip("/")
-    model = env.get("AI_MODEL", "").strip()
-    api_key = env.get("AI_API_KEY", "").strip()
-    if base_url.startswith("https://your-compatible-endpoint") or model == "your-model-name":
-        base_url, model, api_key = "", "", ""
+    env = load_ai_config(environ=environ)
+    base_url = env["AI_BASE_URL"]
+    model = env["AI_MODEL"]
+    api_key = env["AI_API_KEY"]
     if not base_url or not model:
         return offline_answer(question, loaded_report)
     url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"

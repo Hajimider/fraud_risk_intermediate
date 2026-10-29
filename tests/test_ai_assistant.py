@@ -1,7 +1,11 @@
 import json
 
+import pytest
+
+import ai_assistant
 from ai_assistant import (answer_question, build_context, build_messages, load_dotenv,
-                          load_report, normalize_answer, offline_answer, request_timeout)
+                          load_ai_config, load_report, normalize_answer, offline_answer,
+                          request_timeout)
 
 
 def test_context_is_small_and_excludes_raw_test_rows():
@@ -162,3 +166,100 @@ def test_normalize_answer_removes_repeated_report_fields_and_keeps_sections():
     assert "限制或建议" in normalized
     assert "使用的报告字段" not in normalized
     assert "成本假设" not in normalized
+
+
+def test_ai_config_prefers_secrets_then_environment_then_dotenv(monkeypatch):
+    monkeypatch.setattr(ai_assistant, "load_dotenv", lambda: {
+        "AI_BASE_URL": "http://dotenv.local/v1",
+        "AI_MODEL": "dotenv-model",
+        "AI_API_KEY": "dotenv-key",
+        "UNRELATED_VALUE": "not-for-ai",
+    })
+    monkeypatch.setenv("AI_BASE_URL", "http://environment.local/v1")
+    monkeypatch.setenv("AI_MODEL", "environment-model")
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    config = load_ai_config(secrets={
+        "AI_MODEL": " cloud-model ",
+        "AI_TIMEOUT_SECONDS": 120,
+        "UNRELATED_SECRET": "not-for-ai",
+    })
+    assert config == {
+        "AI_BASE_URL": "http://environment.local/v1",
+        "AI_MODEL": "cloud-model",
+        "AI_API_KEY": "dotenv-key",
+        "AI_TIMEOUT_SECONDS": "120",
+    }
+
+
+def test_ai_config_disables_placeholder_secrets():
+    config = load_ai_config(environ={}, secrets={
+        "AI_BASE_URL": "https://your-compatible-endpoint/v1",
+        "AI_MODEL": "your-model-name",
+        "AI_API_KEY": "your-api-key",
+    })
+    assert not config["AI_BASE_URL"] and not config["AI_MODEL"]
+
+
+@pytest.mark.parametrize("source", ["secrets", "environment"])
+def test_dashboard_uses_cloud_config_for_status_and_request(monkeypatch, source):
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(ai_assistant, "load_dotenv", lambda: {})
+    for key in ai_assistant.AI_CONFIG_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    config = {
+        "AI_BASE_URL": "http://mock.local/v1",
+        "AI_MODEL": "cloud-model",
+        "AI_API_KEY": "fake-cloud-key",
+        "AI_TIMEOUT_SECONDS": 120,
+    }
+    captured = {}
+
+    def fake_transport(url, payload, headers, timeout):
+        captured.update(url=url, payload=payload, headers=headers, timeout=timeout)
+        return {"choices": [{"message": {"content": "云端配置测试回答。"}}]}
+
+    monkeypatch.setattr(ai_assistant, "_post_json", fake_transport)
+    app = AppTest.from_file(str(ai_assistant.DEFAULT_REPORT.parents[1] / "dashboard.py"))
+    if source == "secrets":
+        app.secrets.update(config)
+    else:
+        for key, value in config.items():
+            monkeypatch.setenv(key, str(value))
+    app.run(timeout=30)
+    app.sidebar.radio[0].set_value("AI 风控分析").run(timeout=30)
+    assert not app.exception
+    rendered = "\n".join(item.value for item in app.markdown)
+    assert "AI 服务已配置" in rendered
+    assert "fake-cloud-key" not in rendered
+    app.button(key="ai_submit").click().run(timeout=30)
+    assert not app.exception and app.success
+    assert captured["url"] == "http://mock.local/v1/chat/completions"
+    assert captured["payload"]["model"] == "cloud-model"
+    assert captured["headers"]["Authorization"] == "Bearer fake-cloud-key"
+    assert captured["timeout"] == 120.0
+    rendered = "\n".join(item.value for item in app.markdown)
+    assert "云端配置测试回答。" in rendered
+    assert "fake-cloud-key" not in rendered
+
+
+def test_dashboard_without_config_explains_cloud_secrets_and_stays_offline(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(ai_assistant, "load_dotenv", lambda: {})
+    for key in ai_assistant.AI_CONFIG_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+    def unexpected_request(*args):
+        pytest.fail("没有配置时不应发起请求")
+
+    monkeypatch.setattr(ai_assistant, "_post_json", unexpected_request)
+    app = AppTest.from_file(str(ai_assistant.DEFAULT_REPORT.parents[1] / "dashboard.py"))
+    app.run(timeout=30)
+    app.sidebar.radio[0].set_value("AI 风控分析").run(timeout=30)
+    assert not app.exception
+    rendered = "\n".join(item.value for item in app.markdown)
+    assert "Settings → Secrets" in rendered
+    app.button(key="ai_submit").click().run(timeout=30)
+    assert not app.exception
+    assert any("离线摘要" in item.value for item in app.info)
