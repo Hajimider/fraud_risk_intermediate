@@ -80,6 +80,8 @@ def build_context(report: Mapping[str, Any], top_features: int = 15) -> dict[str
             "欺诈笔数": report.get("欺诈笔数"),
         },
         "时间切分": report.get("时间切分", {}),
+        "滚动验证窗口": report.get("滚动验证窗口", []),
+        "滚动验证结果": report.get("滚动验证结果", []),
         "模型比较": report.get("模型比较", []),
         "验证集选定模型": report.get("验证集选定模型"),
         "测试集指标": {
@@ -155,7 +157,7 @@ def _question_topic(question: str) -> tuple[str, list[str]]:
     """按关键词确定主题和引用字段，离线摘要与 AI 回答使用同一套规则。"""
     text = " ".join(str(question).lower().split())
     if any(word in text for word in ("模型", "xgboost", "逻辑回归", "比较")):
-        return "模型", ["模型比较", "验证集选定模型", "时间切分"]
+        return "模型", ["滚动验证窗口", "滚动验证结果", "模型比较", "验证集选定模型", "时间切分"]
     if any(word in text for word in ("策略", "阈值", "复核", "拦截", "容量")):
         return "策略", ["验证集选定策略", "测试集冻结策略表现", "成本假设"]
     if any(word in text for word in ("成本", "收益", "损失")):
@@ -175,11 +177,25 @@ def offline_answer(question: str, report: Mapping[str, Any]) -> dict[str, Any]:
     strategy = context["测试集冻结策略表现"]
     if topic == "模型":
         comparison = context["模型比较"]
-        answer = (
-            f"验证集上，{comparison[0]['模型']} 的 AP 为 {comparison[0]['验证集AP']:.4f}，"
-            f"{comparison[1]['模型']} 为 {comparison[1]['验证集AP']:.4f}，因此选定 {context['验证集选定模型']}。"
-            "\n\n模型和策略阈值都在验证集上确定，测试集来自后续时间段。当前比较基于一次时间切分，还需更多时间窗口检验。"
-        )
+        if comparison and "平均AP" in comparison[0]:
+            results = "；".join(
+                f"{row['模型']} AP 均值 {row['平均AP']:.4f}、标准差 {row['AP标准差']:.4f}"
+                for row in comparison
+            )
+            windows = context["滚动验证窗口"]
+            baseline = "、".join(
+                f"{row['窗口']} {row['欺诈率基线AP']:.4f}" for row in windows
+            )
+            answer = (
+                f"三个扩展验证窗口的结果为：{results}。按 AP 均值选择 {context['验证集选定模型']}。"
+                f"各窗口欺诈率基线 AP 为 {baseline}。"
+                "\n\n末段测试集未参与模型选择；这些窗口仅覆盖公开数据约48小时，不能代表长期稳定性。"
+            )
+        else:
+            answer = (
+                f"本次报告选定{context['验证集选定模型']}。\n\n"
+                "当前报告没有滚动验证明细，无法据此比较不同时间窗口的 AP。"
+            )
     elif topic == "策略":
         capacity = context["成本假设"]["最大复核比例"]
         answer = (

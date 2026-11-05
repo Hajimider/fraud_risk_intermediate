@@ -26,19 +26,21 @@ def test_offline_answer_contains_report_fact_and_sources():
     report = load_report()
     result = offline_answer("测试集指标说明了什么？", report)
     assert result["mode"] == "offline"
-    assert "0.7675" in result["answer"]
+    assert f"{report['测试集指标']['平均精确率AP']:.4f}" in result["answer"]
     assert "测试集指标" in result["sources"]
     assert "字段" in result["answer"]
 
 
 def test_missing_ai_configuration_stays_offline():
+    report = load_report()
     result = answer_question(
         "为什么选择当前模型？",
-        report=load_report(),
+        report=report,
         environ={"AI_BASE_URL": "", "AI_MODEL": ""},
     )
     assert result["mode"] == "offline"
-    assert "XGBoost" in result["answer"]
+    assert report["验证集选定模型"] in result["answer"]
+    assert "标准差" in result["answer"]
 
 
 def test_dotenv_loader_reads_quoted_values_without_overwriting_process_env(tmp_path):
@@ -65,6 +67,7 @@ def test_placeholder_dotenv_stays_offline():
 
 
 def test_openai_compatible_transport_is_injected_and_context_is_bounded():
+    report = load_report()
     captured = {}
 
     def fake_transport(url, payload, headers, timeout):
@@ -73,7 +76,7 @@ def test_openai_compatible_transport_is_injected_and_context_is_bounded():
 
     result = answer_question(
         "为什么选择当前模型？",
-        report=load_report(),
+        report=report,
         environ={"AI_BASE_URL": "http://mock.local/v1", "AI_MODEL": "demo", "AI_API_KEY": "secret"},
         transport=fake_transport,
     )
@@ -84,50 +87,53 @@ def test_openai_compatible_transport_is_injected_and_context_is_bounded():
     prompt = json.dumps(captured["payload"], ensure_ascii=False)
     assert "secret" not in prompt
     assert "creditcard.csv" not in prompt
-    assert "0.7675" in result["answer"]
+    assert f"{report['测试集指标']['平均精确率AP']:.4f}" in result["answer"]
 
 
 def test_api_error_falls_back_without_exposing_secret():
+    report = load_report()
     def failing_transport(url, payload, headers, timeout):
         raise OSError("simulated network failure")
 
     result = answer_question(
         "测试集指标说明了什么？",
-        report=load_report(),
+        report=report,
         environ={"AI_BASE_URL": "http://mock.local/v1", "AI_MODEL": "demo", "AI_API_KEY": "secret"},
         transport=failing_transport,
     )
     assert result["mode"] == "offline-fallback"
-    assert "0.7675" in result["answer"]
+    assert f"{report['测试集指标']['平均精确率AP']:.4f}" in result["answer"]
     assert "secret" not in result["error"]
 
 
 def test_unexpected_api_error_also_falls_back():
+    report = load_report()
     def failing_transport(url, payload, headers, timeout):
         raise RuntimeError("simulated provider failure")
 
     result = answer_question(
         "测试集指标说明了什么？",
-        report=load_report(),
+        report=report,
         environ={"AI_BASE_URL": "http://mock.local/v1", "AI_MODEL": "demo"},
         transport=failing_transport,
     )
     assert result["mode"] == "offline-fallback"
-    assert "0.7675" in result["answer"]
+    assert f"{report['测试集指标']['平均精确率AP']:.4f}" in result["answer"]
 
 
 def test_invalid_api_payload_falls_back():
+    report = load_report()
     def invalid_transport(url, payload, headers, timeout):
         return {"unexpected": "shape"}
 
     result = answer_question(
         "测试集指标说明了什么？",
-        report=load_report(),
+        report=report,
         environ={"AI_BASE_URL": "http://mock.local/v1", "AI_MODEL": "demo"},
         transport=invalid_transport,
     )
     assert result["mode"] == "offline-fallback"
-    assert "0.7675" in result["answer"]
+    assert f"{report['测试集指标']['平均精确率AP']:.4f}" in result["answer"]
 
 
 def test_ai_sources_follow_question_topic():

@@ -18,9 +18,17 @@ from sklearn.metrics import (
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
+from sql_analysis import analyze_transactions
+
 ROOT = Path(__file__).resolve().parent
 RAW_FEATURES = ["Amount", *[f"V{i}" for i in range(1, 29)]]
 MODEL_FEATURES = ["Amount", "LogAmount", *[f"V{i}" for i in range(1, 29)]]
+ROLLING_RATIOS = (0.4, 0.55, 0.7, 0.85, 1.0)
+MODEL_CANDIDATES = (
+    ("类别加权逻辑回归", "logistic", True),
+    ("类别加权XGBoost", "xgboost", True),
+    ("类别加权XGBoost（移除LogAmount）", "xgboost", False),
+)
 
 
 def make_demo_data(rows=12000, seed=42):
@@ -40,11 +48,13 @@ def make_demo_data(rows=12000, seed=42):
     return frame
 
 
-def build_features(frame):
+def build_features(frame, include_log_amount=True):
     """保留原始特征，并对金额取对数。"""
     features = frame[RAW_FEATURES].copy()
-    features["LogAmount"] = np.log1p(features["Amount"].clip(lower=0))
-    return features[MODEL_FEATURES]
+    if include_log_amount:
+        features["LogAmount"] = np.log1p(features["Amount"].clip(lower=0))
+        return features[MODEL_FEATURES]
+    return features[RAW_FEATURES]
 
 
 def time_split(frame):
@@ -60,6 +70,58 @@ def time_split(frame):
     validation = ordered.loc[(ordered.Time > first_time) & (ordered.Time <= second_time)]
     test = ordered.loc[ordered.Time > second_time]
     return train, validation, test
+
+
+def rolling_time_splits(frame):
+    """构造三个扩展训练窗口，并保留最后15%作为唯一测试集。"""
+    ordered = frame.sort_values("Time", kind="stable").reset_index(drop=True)
+    times = np.sort(ordered["Time"].unique())
+    boundaries = [int(len(times) * ratio) for ratio in ROLLING_RATIOS]
+    if len(times) < 10 or any(a >= b for a, b in zip([0, *boundaries[:-1]], boundaries)):
+        raise ValueError("滚动验证至少需要10个不同交易时间")
+
+    windows = []
+    previous_end = 0
+    for index in range(len(boundaries) - 2):
+        train_end = boundaries[index]
+        validation_end = boundaries[index + 1]
+        train_cutoff = times[train_end - 1]
+        validation_cutoff = times[validation_end - 1]
+        train = ordered.loc[ordered["Time"] <= train_cutoff]
+        validation = ordered.loc[
+            (ordered["Time"] > train_cutoff) & (ordered["Time"] <= validation_cutoff)
+        ]
+        if train["Class"].nunique() < 2 or validation["Class"].nunique() < 2:
+            raise ValueError("每个滚动训练和验证窗口都需要包含正常与欺诈样本")
+        windows.append({
+            "窗口": f"{int(ROLLING_RATIOS[index] * 100)}%-{int(ROLLING_RATIOS[index + 1] * 100)}%",
+            "train": train,
+            "validation": validation,
+        })
+
+    test_cutoff = times[boundaries[-2] - 1]
+    test = ordered.loc[ordered["Time"] > test_cutoff]
+    if test["Class"].nunique() < 2:
+        raise ValueError("最后15%的测试集需要同时包含正常与欺诈样本")
+    return windows, test
+
+
+def make_model(kind, train_labels, trees, seed):
+    if kind == "logistic":
+        return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=seed)
+    positive_weight = (train_labels == 0).sum() / (train_labels == 1).sum()
+    return XGBClassifier(
+        n_estimators=trees,
+        max_depth=4,
+        learning_rate=0.08,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        scale_pos_weight=positive_weight,
+        eval_metric="logloss",
+        tree_method="hist",
+        n_jobs=2,
+        random_state=seed,
+    )
 
 
 def cost_of_actions(
@@ -168,50 +230,60 @@ def run(data_path=None, rows=12000, trees=80, seed=42):
     else:
         frame = make_demo_data(rows, seed)
         source = "合成教学数据"
+    frame["Time"] = pd.to_numeric(frame["Time"], errors="coerce")
     frame[RAW_FEATURES] = frame[RAW_FEATURES].apply(pd.to_numeric, errors="coerce")
+    if frame["Time"].isna().any() or not np.isfinite(frame["Time"]).all():
+        raise ValueError("Time必须是无缺失的有限数值")
     if frame[RAW_FEATURES].isna().any().any():
         raise ValueError("特征列包含缺失值或非数值，请先清洗数据")
     if frame["Class"].isna().any() or not frame["Class"].isin([0, 1]).all():
         raise ValueError("Class必须是无缺失的0/1标签")
-    train, validation, test = time_split(frame)
-    if any(split.Class.nunique() < 2 for split in (train, validation, test)):
-        raise ValueError("训练、验证和测试集都需要同时包含正常与欺诈样本；请增加数据量")
+    sql_summary, profile = analyze_transactions(frame)
+    windows, test = rolling_time_splits(frame)
+    scores_by_candidate = {name: [] for name, _, _ in MODEL_CANDIDATES}
+    window_results = []
+    window_summaries = []
+    last_models = {}
+    last_validation_scores = {}
 
-    scaler = StandardScaler()
-    x_train = scaler.fit_transform(build_features(train))
-    x_valid = scaler.transform(build_features(validation))
-    x_test = scaler.transform(build_features(test))
-    positive_weight = (train.Class == 0).sum() / (train.Class == 1).sum()
-    models = {
-        "类别加权逻辑回归": LogisticRegression(
-            max_iter=1000, class_weight="balanced", random_state=seed,
-        ),
-        "类别加权XGBoost": XGBClassifier(
-            n_estimators=trees,
-            max_depth=4,
-            learning_rate=0.08,
-            subsample=0.85,
-            colsample_bytree=0.85,
-            scale_pos_weight=positive_weight,
-            eval_metric="logloss",
-            tree_method="hist",
-            n_jobs=2,
-            random_state=seed,
-        ),
-    }
-    validation_scores = {}
+    for window in windows:
+        train, validation = window["train"], window["validation"]
+        baseline_ap = float(validation["Class"].mean())
+        window_summaries.append({
+            "窗口": window["窗口"],
+            "训练集笔数": len(train),
+            "验证集笔数": len(validation),
+            "欺诈笔数": int(validation["Class"].sum()),
+            "欺诈率基线AP": baseline_ap,
+        })
+        for name, kind, include_log_amount in MODEL_CANDIDATES:
+            feature_columns = MODEL_FEATURES if include_log_amount else RAW_FEATURES
+            scaler = StandardScaler()
+            x_train = scaler.fit_transform(build_features(train, include_log_amount))
+            x_validation = scaler.transform(build_features(validation, include_log_amount))
+            model = make_model(kind, train["Class"].to_numpy(), trees, seed)
+            model.fit(x_train, train["Class"])
+            validation_score = model.predict_proba(x_validation)[:, 1]
+            ap = float(average_precision_score(validation["Class"], validation_score))
+            scores_by_candidate[name].append(ap)
+            window_results.append({"窗口": window["窗口"], "模型": name, "AP": ap})
+            if window is windows[-1]:
+                last_models[name] = (model, scaler, feature_columns)
+                last_validation_scores[name] = validation_score
+
     comparison = []
-    for name, model in models.items():
-        model.fit(x_train, train.Class)
-        valid_score = model.predict_proba(x_valid)[:, 1]
-        validation_scores[name] = valid_score
+    for name, scores in scores_by_candidate.items():
         comparison.append({
             "模型": name,
-            "验证集AP": float(average_precision_score(validation.Class, valid_score)),
+            "最近窗口AP": scores[-1],
+            "平均AP": float(np.mean(scores)),
+            "AP标准差": float(np.std(scores, ddof=1)),
         })
-    winner = max(comparison, key=lambda row: row["验证集AP"])["模型"]
-    winning_model = models[winner]
-    policy = choose_policy(validation.Class, validation_scores[winner])
+    winner = max(comparison, key=lambda row: row["平均AP"])["模型"]
+    winning_model, scaler, selected_features = last_models[winner]
+    last_validation = windows[-1]["validation"]
+    policy = choose_policy(last_validation["Class"], last_validation_scores[winner])
+    x_test = scaler.transform(build_features(test, include_log_amount="LogAmount" in selected_features))
     test_score = winning_model.predict_proba(x_test)[:, 1]
     test_cost = cost_of_actions(test.Class, test_score, policy["复核阈值"], policy["拦截阈值"])
     allow_all = cost_of_actions(test.Class, test_score, 2, 2)
@@ -221,7 +293,7 @@ def run(data_path=None, rows=12000, trees=80, seed=42):
         if allow_all["模拟成本"] else None
     )
 
-    if winner == "类别加权XGBoost":
+    if "XGBoost" in winner:
         importance_values = winning_model.feature_importances_
         explanation = "XGBoost原生特征重要性（不代表因果关系）"
     else:
@@ -231,20 +303,39 @@ def run(data_path=None, rows=12000, trees=80, seed=42):
         "数据来源": source,
         "总笔数": len(frame),
         "欺诈笔数": int(frame.Class.sum()),
-        "时间切分": {"训练集": len(train), "验证集": len(validation), "测试集": len(test)},
+        "时间切分": {
+            "训练集": len(windows[-1]["train"]),
+            "验证集": len(last_validation),
+            "测试集": len(test),
+        },
+        "滚动验证窗口": window_summaries,
+        "滚动验证结果": window_results,
         "模型比较": comparison,
         "验证集选定模型": winner,
+        "特征消融": [
+            {
+                "窗口": window["窗口"],
+                "完整XGBoost_AP": scores_by_candidate["类别加权XGBoost"][index],
+                "移除LogAmount_AP": scores_by_candidate["类别加权XGBoost（移除LogAmount）"][index],
+                "AP变化": (
+                    scores_by_candidate["类别加权XGBoost（移除LogAmount）"][index]
+                    - scores_by_candidate["类别加权XGBoost"][index]
+                ),
+            }
+            for index, window in enumerate(windows)
+        ],
         "测试集指标": classification_metrics(test.Class, test_score),
         "验证集选定策略": policy,
         "测试集冻结策略表现": test_cost,
         "解释方法": explanation,
-        "特征工程": ["LogAmount=log1p(交易金额)"],
+        "特征工程": ["LogAmount=log1p(交易金额)"] if "LogAmount" in selected_features else [],
         "数据质量": {
-            "缺失值总数": int(frame[RAW_FEATURES].isna().sum().sum()),
-            "重复行数": int(frame.duplicated().sum()),
+            "缺失值总数": sql_summary["缺失值总数"],
+            "重复行数": sql_summary["重复行数"],
         },
+        "SQL数据画像": sql_summary,
         "特征重要性": sorted(
-            zip(MODEL_FEATURES, importance_values.tolist()),
+            zip(selected_features, importance_values.tolist()),
             key=lambda pair: pair[1], reverse=True,
         )[:15],
         "成本假设": {
@@ -265,11 +356,5 @@ def run(data_path=None, rows=12000, trees=80, seed=42):
     pd.DataFrame({"欺诈标签": test.Class.to_numpy(), "风险分数": test_score}).to_csv(
         report_dir / "test_scores.csv", index=False, encoding="utf-8-sig",
     )
-    profile = (
-        frame.assign(相对小时=(frame["Time"] // 3600).astype(int))
-        .groupby("相对小时")
-        .agg(交易笔数=("Class", "size"), 欺诈笔数=("Class", "sum"), 平均金额=("Amount", "mean"))
-    )
-    profile["欺诈比例"] = profile["欺诈笔数"] / profile["交易笔数"]
-    profile.reset_index().to_csv(report_dir / "hour_profile.csv", index=False, encoding="utf-8-sig")
+    profile.to_csv(report_dir / "hour_profile.csv", index=False, encoding="utf-8-sig")
     return report

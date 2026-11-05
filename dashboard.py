@@ -199,8 +199,7 @@ def risk_distribution_chart(scores: pd.DataFrame) -> alt.Chart:
 
 def hourly_chart(profile: pd.DataFrame, field: str, color: str, title: str) -> alt.Chart:
     data = profile[["相对小时", field]].rename(columns={field: "数值"})
-    return chart_base(
-        alt.Chart(data).mark_line(
+    line = alt.Chart(data).mark_line(
             color=color, strokeWidth=3,
             point=alt.OverlayMarkDef(color=color, size=45),
         ).encode(
@@ -210,9 +209,46 @@ def hourly_chart(profile: pd.DataFrame, field: str, color: str, title: str) -> a
                 alt.Tooltip("相对小时:Q", title="相对小时"),
                 alt.Tooltip("数值:Q", title=title, format=".2%" if "比例" in title else ",.2f"),
             ],
-        ),
-        220,
+        )
+    if "欺诈率下限" not in profile or "欺诈率上限" not in profile or field != "欺诈比例":
+        return chart_base(line, 220)
+    band = alt.Chart(profile).mark_area(color=color, opacity=0.16).encode(
+        x=alt.X("相对小时:Q", axis=alt.Axis(title="相对小时")),
+        y=alt.Y("欺诈率下限:Q", axis=alt.Axis(title=title, format=".2%")),
+        y2="欺诈率上限:Q",
+        tooltip=[
+            alt.Tooltip("相对小时:Q", title="相对小时"),
+            alt.Tooltip("交易笔数:Q", title="交易笔数", format=","),
+            alt.Tooltip("欺诈比例:Q", title="欺诈比例", format=".2%"),
+            alt.Tooltip("欺诈率下限:Q", title="95%区间下限", format=".2%"),
+            alt.Tooltip("欺诈率上限:Q", title="95%区间上限", format=".2%"),
+        ],
     )
+    return chart_base(alt.layer(band, line), 220)
+
+
+def validation_chart(report: dict) -> alt.Chart:
+    data = pd.DataFrame(report["滚动验证结果"])
+    data["模型"] = data["模型"].replace({
+        "类别加权逻辑回归": "逻辑回归",
+        "类别加权XGBoost": "XGBoost",
+        "类别加权XGBoost（移除LogAmount）": "XGBoost（无金额对数）",
+    })
+    order = [row["窗口"] for row in report["滚动验证窗口"]]
+    chart = alt.Chart(data).mark_line(
+        point=alt.OverlayMarkDef(size=60), strokeWidth=2.5,
+    ).encode(
+        x=alt.X("窗口:N", sort=order, axis=alt.Axis(title="时间窗口")),
+        y=alt.Y("AP:Q", axis=alt.Axis(title="平均精确率 AP", format=".2f"), scale=alt.Scale(zero=True)),
+        color=alt.Color("模型:N", title="模型"),
+        detail="模型:N",
+        tooltip=[
+            alt.Tooltip("窗口:N", title="验证窗口"),
+            alt.Tooltip("模型:N", title="模型"),
+            alt.Tooltip("AP:Q", title="AP", format=".4f"),
+        ],
+    )
+    return chart_base(chart, 300)
 
 
 def feature_chart(importance: pd.DataFrame) -> alt.Chart:
@@ -309,10 +345,37 @@ def show_overview(report: dict, metrics: dict, scores: pd.DataFrame, profile: pd
         with chart_right:
             st.caption("平均交易金额")
             st.altair_chart(hourly_chart(profile, "平均金额", "#2563eb", "平均金额"), width="stretch")
+    sql_profile = report["SQL数据画像"]
+    with st.container(border=True):
+        panel_title("SQL 数据画像", "DuckDB 执行分组统计；重复记录保留，金额分布按欺诈标签比较")
+        quality_left, quality_right = st.columns(2)
+        with quality_left:
+            show_table(pd.DataFrame([
+                ("SQL统计交易数", sql_profile["交易总数"]),
+                ("SQL统计欺诈数", sql_profile["欺诈笔数"]),
+                ("总体欺诈比例", f"{sql_profile['欺诈比例']:.3%}"),
+                ("缺失值单元格", sql_profile["缺失值总数"]),
+                ("完全重复行", sql_profile["重复行数"]),
+            ], columns=["统计项", "结果"]))
+        with quality_right:
+            amount = pd.DataFrame(sql_profile["金额分布"])
+            amount["四分位区间"] = amount.apply(
+                lambda row: f"{row['金额P25']:.2f}–{row['金额P75']:.2f}", axis=1,
+            )
+            amount = amount[["欺诈标签", "交易笔数", "平均金额", "金额中位数", "四分位区间", "金额P90"]]
+            amount = amount.rename(columns={
+                "欺诈标签": "类型",
+                "交易笔数": "笔数",
+                "平均金额": "均值",
+                "金额中位数": "中位数",
+                "金额P90": "P90",
+            })
+            amount["类型"] = amount["类型"].map({0: "正常", 1: "欺诈"})
+            show_table(amount)
 
 
 def show_models(report: dict, metrics: dict) -> None:
-    page_header("模型评估", "模型比较与测试结果", "按验证集 AP 选模型，再评估后续时间段的表现")
+    page_header("模型评估", "模型比较与测试结果", "按三个扩展时间窗口比较 AP，最后15%只作一次测试评估")
     selected = report["验证集选定模型"]
     st.markdown('<div class="status-bar">' + status_html(f"验证集选定：{selected}", "green") + status_html("关注指标：平均精确率 / 召回率 / 精确率", "blue") + '</div>', unsafe_allow_html=True)
     left, right = st.columns([1.2, 0.8])
@@ -339,6 +402,24 @@ def show_models(report: dict, metrics: dict) -> None:
             {"实际 / 预测": "欺诈", "预测正常": metrics["假阴性"], "预测欺诈": metrics["真阳性"]},
         ])
         show_table(matrix)
+    with st.container(border=True):
+        panel_title("滚动验证 AP", "按三个验证窗口 AP 均值选择模型；最近窗口结果单独列示")
+        st.altair_chart(validation_chart(report), width="stretch")
+        show_table(pd.DataFrame(report["模型比较"]))
+        st.caption("欺诈率基线 AP 等于该验证窗口的欺诈占比；窗口范围仅覆盖公开数据约48小时。")
+        baseline = pd.DataFrame(report["滚动验证窗口"]).rename(columns={
+            "窗口": "验证窗口",
+            "欺诈率基线AP": "欺诈率基线 AP",
+        })[["验证窗口", "验证集笔数", "欺诈笔数", "欺诈率基线 AP"]]
+        show_table(baseline)
+    with st.container(border=True):
+        panel_title("金额对数特征消融", "比较 XGBoost 保留和移除 LogAmount 后的验证集 AP")
+        ablation = pd.DataFrame(report["特征消融"]).rename(columns={
+            "完整XGBoost_AP": "保留金额对数 AP",
+            "移除LogAmount_AP": "移除金额对数 AP",
+            "AP变化": "移除后的 AP 变化",
+        })
+        show_table(ablation)
 
 
 def show_policy(report: dict) -> None:

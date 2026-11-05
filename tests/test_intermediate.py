@@ -1,7 +1,14 @@
 import numpy as np
 import pandas as pd
 
-from fraud_model import build_features, cost_of_actions, make_demo_data, run, time_split
+from fraud_model import (
+    build_features,
+    cost_of_actions,
+    make_demo_data,
+    rolling_time_splits,
+    run,
+    time_split,
+)
 
 
 def test_time_split_keeps_order_and_sizes():
@@ -36,6 +43,17 @@ def test_time_split_rejects_too_few_unique_timestamps():
         assert "至少需要4个" in str(exc)
     else:
         raise AssertionError("应拒绝少于4个不同时间戳的数据")
+
+
+def test_rolling_time_splits_keep_windows_chronological_and_test_last():
+    folds, test = rolling_time_splits(make_demo_data(rows=12000))
+    assert [fold["窗口"] for fold in folds] == ["40%-55%", "55%-70%", "70%-85%"]
+    assert len(folds) == 3
+    for fold in folds:
+        assert fold["train"].Time.max() < fold["validation"].Time.min()
+        assert fold["train"].Class.nunique() == fold["validation"].Class.nunique() == 2
+    assert folds[-1]["validation"].Time.max() < test.Time.min()
+    assert folds[-1]["train"].Time.max() < folds[-1]["validation"].Time.min()
 
 
 def test_cost_counts_actions_and_capacity():
@@ -73,8 +91,16 @@ def test_train_path_does_not_silently_use_demo_data(tmp_path):
 def test_demo_run_writes_report(tmp_path, monkeypatch):
     import fraud_model
     monkeypatch.setattr(fraud_model, "ROOT", tmp_path)
-    report = run(rows=1600, trees=12)
+    report = run(rows=12000, trees=12)
     assert report["数据来源"] == "合成教学数据"
-    assert report["验证集选定模型"] in {"类别加权逻辑回归", "类别加权XGBoost"}
+    assert report["验证集选定模型"] in {
+        "类别加权逻辑回归",
+        "类别加权XGBoost",
+        "类别加权XGBoost（移除LogAmount）",
+    }
+    assert len(report["滚动验证窗口"]) == 3
+    assert len(report["特征消融"]) == 3
+    assert all("平均AP" in row and "AP标准差" in row for row in report["模型比较"])
+    assert report["SQL数据画像"]["交易总数"] == 12000
     assert (tmp_path / "reports" / "latest.json").exists()
     assert (tmp_path / "reports" / "test_scores.csv").exists()

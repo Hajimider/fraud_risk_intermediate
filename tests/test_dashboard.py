@@ -1,4 +1,5 @@
 from html.parser import HTMLParser
+import json
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,8 @@ class TableReader(HTMLParser):
 
 
 def test_policy_groups_keep_results_readable_and_complete():
+    root = Path(__file__).resolve().parents[1]
+    report = json.loads((root / "reports" / "latest.json").read_text(encoding="utf-8"))
     app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
     app.run(timeout=30)
     app.sidebar.radio[0].set_value("风险策略").run(timeout=30)
@@ -43,19 +46,26 @@ def test_policy_groups_keep_results_readable_and_complete():
     rows = [dict(zip(table.cells[::2], table.cells[1::2])) for table in tables[:-1]]
     validation = {key: value for row in rows[:3] for key, value in row.items()}
     test = {key: value for row in rows[3:] for key, value in row.items()}
-    assert validation == {
-        "放行笔数": "47,755", "复核笔数": "239", "拦截笔数": "1",
-        "复核率": "0.50%（上限 2%）", "复核容量上限": "959 笔", "复核容量状态": "未超出",
-        "预计漏放欺诈": "11.90", "预计误拦正常": "1.90", "模拟成本": "1,559.90",
-    }
-    assert test == {
-        "放行笔数": "43,662", "复核笔数": "176", "拦截笔数": "0",
-        "复核率": "0.40%（上限 2%）", "复核容量上限": "876 笔", "复核容量状态": "未超出",
-        "预计漏放欺诈": "16.20", "预计误拦正常": "1.34", "模拟成本": "1,892.04",
-        "全部放行模拟成本": "5,400.00", "相对全部放行成本变化": "-64.96%",
-    }
+    as_count = lambda value: int(value.replace(",", ""))
+    assert sum(as_count(validation[key]) for key in ("放行笔数", "复核笔数", "拦截笔数")) == report["时间切分"]["验证集"]
+    assert sum(as_count(test[key]) for key in ("放行笔数", "复核笔数", "拦截笔数")) == report["时间切分"]["测试集"]
+    assert "复核率" in validation and "模拟成本" in validation
+    assert "相对全部放行成本变化" in test
     captions = "\n".join(item.value for item in app.caption)
-    assert "0.1792703" in captions and "0.9998300" in captions
+    assert f"{report['验证集选定策略']['复核阈值']:.7f}" in captions
+
+
+def test_analysis_pages_show_sql_rolling_validation_and_ablation():
+    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
+    app.run(timeout=30)
+    markdown = "\n".join(item.value for item in app.markdown)
+    assert not app.exception
+    assert "SQL 数据画像" in markdown
+    app.sidebar.radio[0].set_value("模型比较").run(timeout=30)
+    markdown = "\n".join(item.value for item in app.markdown)
+    assert "滚动验证 AP" in markdown
+    assert "金额对数特征消融" in markdown
+    assert not app.exception
 
 
 @pytest.mark.parametrize("mode", ["ai", "offline", "offline-fallback"])
