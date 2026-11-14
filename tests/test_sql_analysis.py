@@ -1,7 +1,6 @@
 import pandas as pd
-
 from fraud_model import make_demo_data
-from sql_analysis import analyze_transactions, wilson_interval
+from sql_analysis import analyze_transactions, connect_mysql, wilson_interval
 
 
 def test_sql_analysis_counts_nulls_and_duplicate_rows():
@@ -29,3 +28,55 @@ def test_wilson_interval_handles_empty_and_boundary_counts():
     assert low == 0 and 0 < high < 0.1
     low, high = wilson_interval(100, 100)
     assert 0.9 < low < 1 and high == 1
+
+
+def test_ieee_temporal_sql_runs_and_excludes_future_label_information():
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parents[1] / "sql" / "ieee_temporal_features.sql").read_text(encoding="utf-8")
+    frame = pd.DataFrame({
+        "TransactionID": [1, 2, 3, 4],
+        "TransactionDT": [100, 604900, 604900, 1209800],
+        "TransactionAmt": [10.0, 20.0, 30.0, 900.0],
+        "card1": [7, 7, 7, 7],
+        "addr1": [2, 2, 2, 2],
+        "DeviceInfo": ["a", "a", "b", "a"],
+        "isFraud": [1, 0, 1, 1],
+    })
+
+    def evaluate(data):
+        connection = connect_mysql()
+        outputs = []
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SET @label_cutoff_dt = %s", (100,))
+                cursor.execute(
+                    "CREATE TEMPORARY TABLE transactions ("
+                    "TransactionID BIGINT, TransactionDT BIGINT, TransactionAmt DOUBLE, "
+                    "card1 BIGINT, addr1 BIGINT, DeviceInfo VARCHAR(255), isFraud TINYINT)"
+                )
+                cursor.executemany(
+                    "INSERT INTO transactions VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    list(data.itertuples(index=False, name=None)),
+                )
+            for statement in sql.split(";"):
+                if statement.strip():
+                    with connection.cursor() as cursor:
+                        cursor.execute(statement)
+                        columns = [item[0] for item in cursor.description]
+                        outputs.append(pd.DataFrame(cursor.fetchall(), columns=columns))
+        finally:
+            connection.close()
+        return outputs
+
+    original = evaluate(frame)
+    changed = frame.copy()
+    changed.loc[3, ["TransactionAmt", "isFraud"]] = [1.0, 0]
+    updated = evaluate(changed)
+    assert len(original) == 5
+    assert original[0].loc[0, "card_txn_count_1h"] == 0
+    assert original[3].loc[0, "prior_uid_txn_count"] == 0
+    assert original[4].loc[0, "card_fraud_rate_smoothed"] == updated[4].loc[0, "card_fraud_rate_smoothed"]
+    assert original[4].loc[1, "card_fraud_rate_smoothed"] == updated[4].loc[1, "card_fraud_rate_smoothed"]
+    assert original[4].loc[1, "card_fraud_rate_smoothed"] > 0
+    assert original[4].loc[1, "card_fraud_rate_smoothed"] == original[4].loc[2, "card_fraud_rate_smoothed"]

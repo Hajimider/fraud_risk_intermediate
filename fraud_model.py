@@ -1,12 +1,12 @@
 """按时间切分交易数据，比较模型并评估双阈值策略。"""
 
-import json
+from collections import deque
+from dataclasses import dataclass, asdict, replace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sklearn.datasets import make_classification
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
@@ -15,20 +15,12 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.preprocessing import StandardScaler
-from xgboost import XGBClassifier
 
-from sql_analysis import analyze_transactions
 
 ROOT = Path(__file__).resolve().parent
 RAW_FEATURES = ["Amount", *[f"V{i}" for i in range(1, 29)]]
 MODEL_FEATURES = ["Amount", "LogAmount", *[f"V{i}" for i in range(1, 29)]]
 ROLLING_RATIOS = (0.4, 0.55, 0.7, 0.85, 1.0)
-MODEL_CANDIDATES = (
-    ("类别加权逻辑回归", "logistic", True),
-    ("类别加权XGBoost", "xgboost", True),
-    ("类别加权XGBoost（移除LogAmount）", "xgboost", False),
-)
 
 
 def make_demo_data(rows=12000, seed=42):
@@ -81,7 +73,6 @@ def rolling_time_splits(frame):
         raise ValueError("滚动验证至少需要10个不同交易时间")
 
     windows = []
-    previous_end = 0
     for index in range(len(boundaries) - 2):
         train_end = boundaries[index]
         validation_end = boundaries[index + 1]
@@ -99,29 +90,52 @@ def rolling_time_splits(frame):
             "validation": validation,
         })
 
-    test_cutoff = times[boundaries[-2] - 1]
-    test = ordered.loc[ordered["Time"] > test_cutoff]
+    _, _, test = time_split(ordered)
     if test["Class"].nunique() < 2:
         raise ValueError("最后15%的测试集需要同时包含正常与欺诈样本")
     return windows, test
 
 
-def make_model(kind, train_labels, trees, seed):
-    if kind == "logistic":
-        return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=seed)
-    positive_weight = (train_labels == 0).sum() / (train_labels == 1).sum()
-    return XGBClassifier(
-        n_estimators=trees,
-        max_depth=4,
-        learning_rate=0.08,
-        subsample=0.85,
-        colsample_bytree=0.85,
-        scale_pos_weight=positive_weight,
-        eval_metric="logloss",
-        tree_method="hist",
-        n_jobs=2,
-        random_state=seed,
-    )
+
+
+@dataclass(frozen=True)
+class CostParameters:
+    fraud_loss: float = 100.0
+    false_block_cost: float = 6.0
+    review_cost: float = 1.5
+    review_capacity: float = 0.02
+    review_recall: float = 0.9
+    review_false_positive_rate: float = 0.01
+    min_fraud_loss: float = 1.0
+    fraud_loss_multiplier: float = 1.0
+
+    def __post_init__(self):
+        for key, value in asdict(self).items():
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(f"成本参数 {key} 必须为有限非负数")
+        for key in ("review_capacity", "review_recall", "review_false_positive_rate"):
+            if getattr(self, key) > 1:
+                raise ValueError(f"成本参数 {key} 必须在0到1之间")
+
+
+def action_cost_arrays(y_true, scores, amounts, parameters):
+    y, score = np.asarray(y_true), np.asarray(scores, dtype=float)
+    if y.ndim != 1 or score.ndim != 1 or len(y) != len(score) or not len(y):
+        raise ValueError("标签和分数必须是等长非空一维数组")
+    if not np.isin(y, [0, 1]).all() or not np.isfinite(score).all():
+        raise ValueError("标签必须为0/1，分数必须为有限数值")
+    if amounts is None:
+        loss = np.full(len(y), parameters.fraud_loss * parameters.fraud_loss_multiplier)
+    else:
+        amount = np.asarray(amounts, dtype=float)
+        if amount.shape != y.shape or not np.isfinite(amount).all():
+            raise ValueError("金额必须是等长有限数组")
+        loss = np.maximum(amount, parameters.min_fraud_loss) * parameters.fraud_loss_multiplier
+    allow = np.where(y == 1, loss, 0.0)
+    review = np.where(y == 1, loss * (1 - parameters.review_recall),
+                      parameters.review_false_positive_rate * parameters.false_block_cost) + parameters.review_cost
+    block = np.where(y == 0, parameters.false_block_cost, 0.0)
+    return y.astype(int), score, allow, review, block
 
 
 def cost_of_actions(
@@ -129,16 +143,15 @@ def cost_of_actions(
     scores,
     review_threshold,
     block_threshold,
-    fraud_loss=100,
-    false_block_cost=6,
-    review_cost=1.5,
-    review_capacity=0.02,
-    review_recall=0.9,
-    review_false_positive_rate=0.01,
+    amounts=None,
+    cost_params=None,
+    **overrides,
 ):
-    """按放行、复核、拦截统计笔数，并估算漏放和误拦成本。"""
-    y = np.asarray(y_true, dtype=int)
-    score = np.asarray(scores, dtype=float)
+    """按动作估算成本；提供金额时漏放损失按金额加权。"""
+    parameters = replace(cost_params or CostParameters(), **overrides)
+    y, score, allow_cost, review_cost, block_cost = action_cost_arrays(y_true, scores, amounts, parameters)
+    if np.isnan(review_threshold) or np.isnan(block_threshold) or review_threshold > block_threshold:
+        raise ValueError("复核阈值不能大于拦截阈值")
     action = np.where(
         score >= block_threshold,
         "拦截",
@@ -147,17 +160,17 @@ def cost_of_actions(
     review = action == "复核"
     block = action == "拦截"
     # 复核会漏判欺诈，也会误判正常交易，不能按完美审核计算。
-    missed = (
-        int(((action == "放行") & (y == 1)).sum())
-        + int((review & (y == 1)).sum()) * (1 - review_recall)
-    )
+    missed_mask = (action == "放行") & (y == 1)
+    reviewed_fraud = review & (y == 1)
+    fraud_cost = float(allow_cost[missed_mask].sum() + allow_cost[reviewed_fraud].sum() * (1 - parameters.review_recall))
+    missed = int(missed_mask.sum()) + int(reviewed_fraud.sum()) * (1 - parameters.review_recall)
     false_blocks = (
         int((block & (y == 0)).sum())
-        + int((review & (y == 0)).sum()) * review_false_positive_rate
+        + int((review & (y == 0)).sum()) * parameters.review_false_positive_rate
     )
     review_count = int(review.sum())
     block_count = int(block.sum())
-    cost = missed * fraud_loss + false_blocks * false_block_cost + review_count * review_cost
+    cost = float(allow_cost[action == "放行"].sum() + review_cost[review].sum() + block_cost[block].sum())
     review_rate = review_count / len(y)
     return {
         "放行笔数": int((action == "放行").sum()),
@@ -166,42 +179,115 @@ def cost_of_actions(
         "预计漏放欺诈": float(missed),
         "预计误拦正常": float(false_blocks),
         "复核率": review_rate,
-        "是否超出复核容量": review_rate > review_capacity,
+        "是否超出复核容量": review_rate > parameters.review_capacity,
         "模拟成本": float(cost),
+        "漏放损失金额": float(fraud_cost),
     }
 
 
-def choose_policy(y_true, scores, review_capacity=0.02):
-    """在验证集上选成本最低的双阈值策略，成本相同时优先少复核。"""
-    quantiles = np.r_[np.linspace(0, 0.95, 20), 0.97, 0.98, 0.99, 0.995, 1.0]
-    thresholds = np.unique(np.r_[
-        np.quantile(scores, quantiles),
-        np.nextafter(float(np.max(scores)), 2.0),
-    ])
+def choose_policy(y_true, scores, review_capacity=None, amounts=None, cost_params=None, **overrides):
+    """遍历全体唯一分数阈值，利用前缀成本和滑动最大值精确搜索。"""
+    if review_capacity is not None:
+        overrides["review_capacity"] = review_capacity
+    parameters = replace(cost_params or CostParameters(), **overrides)
+    y, score, allow_cost, review_cost, block_cost = action_cost_arrays(y_true, scores, amounts, parameters)
+    order = np.argsort(score, kind="stable")
+    y, score = y[order], score[order]
+    thresholds = np.unique(np.r_[score, np.nextafter(score[-1], np.inf)])
+    starts = np.searchsorted(score, thresholds, side="left")
+    cap = int(np.floor(len(y) * parameters.review_capacity))
+    allow_cost, review_cost, block_cost = allow_cost[order], review_cost[order], block_cost[order]
+    review_prefix = np.r_[0.0, np.cumsum(review_cost - allow_cost)]
+    block_prefix = np.r_[0.0, np.cumsum(block_cost - allow_cost)]
     best = None
-    for i, review_threshold in enumerate(thresholds[:-1]):
-        for block_threshold in thresholds[i + 1:]:
-            result = cost_of_actions(
-                y_true, scores, review_threshold, block_threshold,
-                review_capacity=review_capacity,
-            )
-            if result["是否超出复核容量"] or not result["复核笔数"] or not result["拦截笔数"]:
-                continue
-            row = {
-                "复核阈值": float(review_threshold),
-                "拦截阈值": float(block_threshold),
-                **result,
-            }
-            if best is None or (row["模拟成本"], row["复核率"]) < (best["模拟成本"], best["复核率"]):
-                best = row
+    base = float(allow_cost.sum())
+    candidates = deque()
+    next_review = 0
+    for block_threshold, block_start in zip(thresholds[1:], starts[1:]):
+        if block_start >= len(y):
+            break
+        while next_review < len(starts) and starts[next_review] < block_start:
+            idx = int(starts[next_review])
+            if idx < block_start:
+                while candidates and review_prefix[starts[candidates[-1]]] <= review_prefix[idx]:
+                    candidates.pop()
+                candidates.append(next_review)
+            next_review += 1
+        min_start = block_start - cap
+        while candidates and starts[candidates[0]] < min_start:
+            candidates.popleft()
+        if not candidates:
+            continue
+        review_idx = candidates[0]
+        review_start = int(starts[review_idx])
+        if review_start >= block_start:
+            continue
+        incremental = review_prefix[block_start] - review_prefix[review_start]
+        block_increment = block_prefix[-1] - block_prefix[block_start]
+        total_cost = base + incremental + block_increment
+        review_count = block_start - review_start
+        row = {
+            "复核阈值": float(thresholds[review_idx]),
+            "拦截阈值": float(block_threshold),
+            "放行笔数": review_start,
+            "复核笔数": review_count,
+            "拦截笔数": len(y) - block_start,
+            "复核率": review_count / len(y),
+            "是否超出复核容量": review_count / len(y) > parameters.review_capacity,
+            "模拟成本": float(total_cost),
+        }
+        if not row["复核笔数"] or not row["拦截笔数"]:
+            continue
+        if best is None or (row["模拟成本"], row["复核率"]) < (best["模拟成本"], best["复核率"]):
+            best = row
     if best is None:
         raise ValueError("没有满足复核容量的策略")
-    return best
+    return {
+        "复核阈值": best["复核阈值"], "拦截阈值": best["拦截阈值"],
+        **cost_of_actions(y_true, scores, best["复核阈值"], best["拦截阈值"], amounts=amounts, cost_params=parameters),
+    }
 
 
-def classification_metrics(y_true, scores):
+
+
+def stratified_bootstrap_intervals(
+    y_true, scores, amounts, review_threshold, block_threshold,
+    iterations=1000, seed=42,
+):
+    """按类别分层重采样，返回测试指标和冻结策略成本的百分位区间。"""
     y = np.asarray(y_true, dtype=int)
-    pred = np.asarray(scores) >= 0.5
+    score = np.asarray(scores, dtype=float)
+    amount = np.asarray(amounts, dtype=float)
+    groups = [np.flatnonzero(y == label) for label in (0, 1)]
+    rng = np.random.default_rng(seed)
+    samples = {key: [] for key in ("平均精确率AP", "ROC-AUC", "精确率", "召回率", "模拟成本")}
+    for _ in range(iterations):
+        idx = np.r_[rng.choice(groups[0], len(groups[0]), replace=True), rng.choice(groups[1], len(groups[1]), replace=True)]
+        metric = classification_metrics(y[idx], score[idx], threshold=review_threshold)
+        cost = cost_of_actions(y[idx], score[idx], review_threshold, block_threshold, amounts=amount[idx])
+        for key in samples:
+            samples[key].append(metric.get(key) if key != "模拟成本" else cost[key])
+    return {
+        key: [float(np.percentile(values, 2.5)), float(np.percentile(values, 97.5))]
+        for key, values in samples.items()
+    }
+
+
+def paired_ap_difference_interval(y_true, first_scores, second_scores, iterations=1000, seed=42):
+    y = np.asarray(y_true, dtype=int)
+    first, second = np.asarray(first_scores), np.asarray(second_scores)
+    groups = [np.flatnonzero(y == label) for label in (0, 1)]
+    rng = np.random.default_rng(seed)
+    diffs = []
+    for _ in range(iterations):
+        idx = np.r_[rng.choice(groups[0], len(groups[0]), replace=True), rng.choice(groups[1], len(groups[1]), replace=True)]
+        diffs.append(average_precision_score(y[idx], first[idx]) - average_precision_score(y[idx], second[idx]))
+    return [float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))]
+
+
+def classification_metrics(y_true, scores, threshold=0.5):
+    y = np.asarray(y_true, dtype=int)
+    pred = np.asarray(scores) >= threshold
     tn, fp, fn, tp = confusion_matrix(y, pred, labels=[0, 1]).ravel()
     both_classes = len(np.unique(y)) == 2
     return {
@@ -217,144 +303,6 @@ def classification_metrics(y_true, scores):
     }
 
 
-def run(data_path=None, rows=12000, trees=80, seed=42):
-    if data_path is not None:
-        path = Path(data_path)
-        if not path.exists():
-            raise FileNotFoundError(f"找不到真实数据文件：{path}\n如果只是学习流程，请运行 python run.py demo")
-        frame = pd.read_csv(path)
-        missing = {"Time", "Class", *RAW_FEATURES} - set(frame.columns)
-        if missing:
-            raise ValueError(f"数据缺少字段：{', '.join(sorted(missing))}")
-        source = "公开信用卡CSV"
-    else:
-        frame = make_demo_data(rows, seed)
-        source = "合成教学数据"
-    frame["Time"] = pd.to_numeric(frame["Time"], errors="coerce")
-    frame[RAW_FEATURES] = frame[RAW_FEATURES].apply(pd.to_numeric, errors="coerce")
-    if frame["Time"].isna().any() or not np.isfinite(frame["Time"]).all():
-        raise ValueError("Time必须是无缺失的有限数值")
-    if frame[RAW_FEATURES].isna().any().any():
-        raise ValueError("特征列包含缺失值或非数值，请先清洗数据")
-    if frame["Class"].isna().any() or not frame["Class"].isin([0, 1]).all():
-        raise ValueError("Class必须是无缺失的0/1标签")
-    sql_summary, profile = analyze_transactions(frame)
-    windows, test = rolling_time_splits(frame)
-    scores_by_candidate = {name: [] for name, _, _ in MODEL_CANDIDATES}
-    window_results = []
-    window_summaries = []
-    last_models = {}
-    last_validation_scores = {}
-
-    for window in windows:
-        train, validation = window["train"], window["validation"]
-        baseline_ap = float(validation["Class"].mean())
-        window_summaries.append({
-            "窗口": window["窗口"],
-            "训练集笔数": len(train),
-            "验证集笔数": len(validation),
-            "欺诈笔数": int(validation["Class"].sum()),
-            "欺诈率基线AP": baseline_ap,
-        })
-        for name, kind, include_log_amount in MODEL_CANDIDATES:
-            feature_columns = MODEL_FEATURES if include_log_amount else RAW_FEATURES
-            scaler = StandardScaler()
-            x_train = scaler.fit_transform(build_features(train, include_log_amount))
-            x_validation = scaler.transform(build_features(validation, include_log_amount))
-            model = make_model(kind, train["Class"].to_numpy(), trees, seed)
-            model.fit(x_train, train["Class"])
-            validation_score = model.predict_proba(x_validation)[:, 1]
-            ap = float(average_precision_score(validation["Class"], validation_score))
-            scores_by_candidate[name].append(ap)
-            window_results.append({"窗口": window["窗口"], "模型": name, "AP": ap})
-            if window is windows[-1]:
-                last_models[name] = (model, scaler, feature_columns)
-                last_validation_scores[name] = validation_score
-
-    comparison = []
-    for name, scores in scores_by_candidate.items():
-        comparison.append({
-            "模型": name,
-            "最近窗口AP": scores[-1],
-            "平均AP": float(np.mean(scores)),
-            "AP标准差": float(np.std(scores, ddof=1)),
-        })
-    winner = max(comparison, key=lambda row: row["平均AP"])["模型"]
-    winning_model, scaler, selected_features = last_models[winner]
-    last_validation = windows[-1]["validation"]
-    policy = choose_policy(last_validation["Class"], last_validation_scores[winner])
-    x_test = scaler.transform(build_features(test, include_log_amount="LogAmount" in selected_features))
-    test_score = winning_model.predict_proba(x_test)[:, 1]
-    test_cost = cost_of_actions(test.Class, test_score, policy["复核阈值"], policy["拦截阈值"])
-    allow_all = cost_of_actions(test.Class, test_score, 2, 2)
-    test_cost["全部放行模拟成本"] = allow_all["模拟成本"]
-    test_cost["相对全部放行成本变化"] = (
-        test_cost["模拟成本"] / allow_all["模拟成本"] - 1
-        if allow_all["模拟成本"] else None
-    )
-
-    if "XGBoost" in winner:
-        importance_values = winning_model.feature_importances_
-        explanation = "XGBoost原生特征重要性（不代表因果关系）"
-    else:
-        importance_values = np.abs(winning_model.coef_[0])
-        explanation = "逻辑回归标准化系数绝对值（不代表因果关系）"
-    report = {
-        "数据来源": source,
-        "总笔数": len(frame),
-        "欺诈笔数": int(frame.Class.sum()),
-        "时间切分": {
-            "训练集": len(windows[-1]["train"]),
-            "验证集": len(last_validation),
-            "测试集": len(test),
-        },
-        "滚动验证窗口": window_summaries,
-        "滚动验证结果": window_results,
-        "模型比较": comparison,
-        "验证集选定模型": winner,
-        "特征消融": [
-            {
-                "窗口": window["窗口"],
-                "完整XGBoost_AP": scores_by_candidate["类别加权XGBoost"][index],
-                "移除LogAmount_AP": scores_by_candidate["类别加权XGBoost（移除LogAmount）"][index],
-                "AP变化": (
-                    scores_by_candidate["类别加权XGBoost（移除LogAmount）"][index]
-                    - scores_by_candidate["类别加权XGBoost"][index]
-                ),
-            }
-            for index, window in enumerate(windows)
-        ],
-        "测试集指标": classification_metrics(test.Class, test_score),
-        "验证集选定策略": policy,
-        "测试集冻结策略表现": test_cost,
-        "解释方法": explanation,
-        "特征工程": ["LogAmount=log1p(交易金额)"] if "LogAmount" in selected_features else [],
-        "数据质量": {
-            "缺失值总数": sql_summary["缺失值总数"],
-            "重复行数": sql_summary["重复行数"],
-        },
-        "SQL数据画像": sql_summary,
-        "特征重要性": sorted(
-            zip(selected_features, importance_values.tolist()),
-            key=lambda pair: pair[1], reverse=True,
-        )[:15],
-        "成本假设": {
-            "漏放欺诈损失": 100,
-            "误拦正常成本": 6,
-            "人工复核成本": 1.5,
-            "人工复核召回率": 0.9,
-            "人工复核误判率": 0.01,
-            "最大复核比例": 0.02,
-        },
-        "风险分数说明": "类别加权模型输出未校准分数；策略成本是给定假设下的离线模拟。",
-    }
-    report_dir = ROOT / "reports"
-    report_dir.mkdir(exist_ok=True)
-    (report_dir / "latest.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8",
-    )
-    pd.DataFrame({"欺诈标签": test.Class.to_numpy(), "风险分数": test_score}).to_csv(
-        report_dir / "test_scores.csv", index=False, encoding="utf-8-sig",
-    )
-    profile.to_csv(report_dir / "hour_profile.csv", index=False, encoding="utf-8-sig")
-    return report
+def run(data_path=None, rows=12000, trees=80, seed=42, sql_backend="mysql", output_dir=None, tuning_trials=3, bootstrap_iterations=1000):
+    from experiments import run_experiment
+    return run_experiment(data_path, rows, trees, seed, sql_backend, output_dir or ROOT / "reports", tuning_trials, bootstrap_iterations)

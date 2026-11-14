@@ -8,6 +8,7 @@ from pathlib import Path
 import altair as alt
 import pandas as pd
 import streamlit as st
+from sklearn.calibration import calibration_curve
 
 from ai_assistant import answer_question, load_ai_config, request_timeout
 
@@ -131,6 +132,11 @@ def panel_title(title: str, note: str | None = None) -> None:
 
 def show_table(frame: pd.DataFrame) -> None:
     """渲染浅色表格，避免系统深色主题覆盖表格配色。"""
+    frame = frame.copy()
+    if "金额特征" in frame:
+        frame["金额特征"] = frame["金额特征"].replace({"amount": "仅金额", "log": "仅对数金额", "both": "金额及对数"})
+    if "参数" in frame:
+        frame = frame.drop(columns="参数")
     headers = "".join(f"<th>{html.escape(str(column))}</th>" for column in frame.columns)
     rows = []
     for values in frame.itertuples(index=False, name=None):
@@ -177,8 +183,8 @@ def chart_base(chart: alt.Chart, height: int = 260) -> alt.Chart:
     )
 
 
-def risk_distribution_chart(scores: pd.DataFrame) -> alt.Chart:
-    data = (
+def risk_distribution_chart(scores: pd.DataFrame, aggregate=None) -> alt.Chart:
+    data = pd.DataFrame(aggregate) if aggregate else (
         scores.assign(风险分数分箱=pd.cut(scores["风险分数"], bins=10).astype(str))
         .groupby("风险分数分箱", observed=True)
         .size()
@@ -334,8 +340,12 @@ def show_overview(report: dict, metrics: dict, scores: pd.DataFrame, profile: pd
             st.markdown('<div class="small-note">衍生特征：' + "、".join(report["特征工程"]) + '</div>', unsafe_allow_html=True)
     with right:
         with st.container(border=True):
-            panel_title("测试集风险分数分布", "分数用于风险排序，不等同于校准后的欺诈概率")
-            st.altair_chart(risk_distribution_chart(scores), width="stretch")
+            panel_title("测试集风险分数分布", "验证集选定校准方案，仅代表当前离线样本表现")
+            aggregate = report.get("看板分箱", {}).get("分数分布", [])
+            if aggregate or not scores.empty:
+                st.altair_chart(risk_distribution_chart(scores, aggregate), width="stretch")
+            else:
+                st.info("未提供逐笔测试分数文件；汇总指标和策略报告仍可查看。")
     with st.container(border=True):
         panel_title("按相对时间统计", "相对小时从首笔交易起算，不对应真实钟点")
         chart_left, chart_right = st.columns(2)
@@ -347,7 +357,7 @@ def show_overview(report: dict, metrics: dict, scores: pd.DataFrame, profile: pd
             st.altair_chart(hourly_chart(profile, "平均金额", "#2563eb", "平均金额"), width="stretch")
     sql_profile = report["SQL数据画像"]
     with st.container(border=True):
-        panel_title("SQL 数据画像", "DuckDB 执行分组统计；重复记录保留，金额分布按欺诈标签比较")
+        panel_title("SQL 数据画像", f"{report['SQL数据画像'].get('执行后端', 'mysql').replace('mysql', 'MySQL').replace('duckdb', 'DuckDB')} 执行分组统计；重复记录保留")
         quality_left, quality_right = st.columns(2)
         with quality_left:
             show_table(pd.DataFrame([
@@ -374,7 +384,7 @@ def show_overview(report: dict, metrics: dict, scores: pd.DataFrame, profile: pd
             show_table(amount)
 
 
-def show_models(report: dict, metrics: dict) -> None:
+def show_models(report: dict, metrics: dict, scores: pd.DataFrame) -> None:
     page_header("模型评估", "模型比较与测试结果", "按三个扩展时间窗口比较 AP，最后15%只作一次测试评估")
     selected = report["验证集选定模型"]
     st.markdown('<div class="status-bar">' + status_html(f"验证集选定：{selected}", "green") + status_html("关注指标：平均精确率 / 召回率 / 精确率", "blue") + '</div>', unsafe_allow_html=True)
@@ -395,8 +405,61 @@ def show_models(report: dict, metrics: dict) -> None:
                 {"指标": "F1", "结果": num(metrics["F1"])},
             ])
             show_table(metric_rows)
+        intervals = report.get("测试集指标95%区间", {})
+        if intervals:
+            st.caption(f"分层 Bootstrap 95% 区间（{report.get('重采样次数', 1000):,} 次）")
+            show_table(pd.DataFrame([
+                {"指标": key, "下限": bounds[0], "上限": bounds[1]}
+                for key, bounds in intervals.items()
+            ]))
+        if "Brier分数" in metrics:
+            st.caption(
+                f"Brier 分数：校准前 {metrics['校准前Brier分数']:.4f}，"
+                f"校准后 {metrics['Brier分数']:.4f}"
+            )
+            if "常数基线Brier" in metrics:
+                st.caption(f"常数基线 Brier {metrics['常数基线Brier']:.6f}；Brier 技能分 {metrics['Brier技能分']:.2%}。基线概率只由历史校准段估计。")
     with st.container(border=True):
-        panel_title("混淆矩阵", "分类阈值 0.5 仅用于展示，不是三段式策略阈值")
+        panel_title("模型差异不确定性", "配对 Bootstrap 使用最近验证窗口，未使用测试集选型")
+        result = report.get("模型差异检验", {})
+        bounds = result.get("AP差值95%区间", [])
+        if bounds:
+            st.write(
+                f"{result['比较窗口']}：逻辑回归 - XGBoost 的 AP 差值 95% 区间 "
+                f"[{bounds[0]:.4f}, {bounds[1]:.4f}]。{result['选择依据']}。"
+            )
+    with st.container(border=True):
+        panel_title("测试集可靠性曲线", "测试标签仅用于校准结果的最终展示")
+        aggregate = report.get("看板分箱", {}).get("可靠性曲线", [])
+        if aggregate:
+            observed = [row["实际欺诈比例"] for row in aggregate]
+            predicted = [row["平均预测风险"] for row in aggregate]
+        elif scores.empty:
+            st.info("未提供逐笔测试分数文件，无法绘制可靠性曲线。")
+            observed, predicted = [], []
+        else:
+            observed, predicted = calibration_curve(
+                scores["欺诈标签"], scores["风险分数"], n_bins=10, strategy="quantile",
+            )
+        if len(observed):
+            reliability = pd.DataFrame({
+                "平均预测风险": predicted,
+                "实际欺诈比例": observed,
+            })
+            chart = alt.Chart(reliability).mark_line(point=True, color="#0f766e").encode(
+                x=alt.X("平均预测风险:Q", scale=alt.Scale(domain=[0, 1]), title="平均预测风险"),
+                y=alt.Y("实际欺诈比例:Q", scale=alt.Scale(domain=[0, 1]), title="实际欺诈比例"),
+                tooltip=[
+                    alt.Tooltip("平均预测风险:Q", format=".4f"),
+                    alt.Tooltip("实际欺诈比例:Q", format=".4f"),
+                ],
+            )
+            reference = alt.Chart(pd.DataFrame({"x": [0, 1], "y": [0, 1]})).mark_line(
+                color="#94a3b8", strokeDash=[4, 4],
+            ).encode(x="x:Q", y="y:Q")
+            st.altair_chart(chart + reference, width="stretch")
+    with st.container(border=True):
+        panel_title("混淆矩阵", "使用验证集冻结的复核阈值作为告警阈值；不是直接拦截规则")
         matrix = pd.DataFrame([
             {"实际 / 预测": "正常", "预测正常": metrics["真阴性"], "预测欺诈": metrics["假阳性"]},
             {"实际 / 预测": "欺诈", "预测正常": metrics["假阴性"], "预测欺诈": metrics["真阳性"]},
@@ -413,13 +476,23 @@ def show_models(report: dict, metrics: dict) -> None:
         })[["验证窗口", "验证集笔数", "欺诈笔数", "欺诈率基线 AP"]]
         show_table(baseline)
     with st.container(border=True):
-        panel_title("金额对数特征消融", "比较 XGBoost 保留和移除 LogAmount 后的验证集 AP")
+        panel_title("金额对数特征消融", "两类模型分别比较 Amount、LogAmount 与两者同时输入；固定各自选定超参数")
         ablation = pd.DataFrame(report["特征消融"]).rename(columns={
             "完整XGBoost_AP": "保留金额对数 AP",
             "移除LogAmount_AP": "移除金额对数 AP",
             "AP变化": "移除后的 AP 变化",
         })
         show_table(ablation)
+    if report.get("校准方案比较"):
+        with st.container(border=True):
+            panel_title("校准方案比较", report["校准结果"]["方法"] + "；按验证Brier选择，同模型校准后不重训")
+            show_table(pd.DataFrame(report["校准方案比较"]).drop(columns=["可靠性分箱"], errors="ignore"))
+    if report.get("误差分析"):
+        with st.container(border=True):
+            panel_title("误差分析", report["误差分析"]["口径"])
+            show_table(pd.DataFrame(report["误差分析"]["金额分布"]))
+            show_table(pd.DataFrame(report["误差分析"]["验证与测试对照"]))
+            st.caption(f"漏放损失最高的3笔占比：{report['误差分析']['漏放损失前3笔占比']:.1%}")
 
 
 def show_policy(report: dict) -> None:
@@ -452,6 +525,26 @@ def show_policy(report: dict) -> None:
     with st.container(border=True):
         panel_title("成本假设", "以下为设定值，未使用真实业务费用")
         show_table(pd.DataFrame(report["成本假设"].items(), columns=["成本参数", "数值"]))
+    sensitivity = report.get("成本敏感性分析", [])
+    if sensitivity:
+        with st.container(border=True):
+            panel_title("成本敏感性分析", "每组假设在验证集重新搜索阈值，再冻结用于测试")
+            sensitivity_frame = pd.DataFrame(sensitivity).rename(columns={
+                "欺诈损失金额倍率": "金额损失倍率",
+                "固定验证策略测试成本": "测试成本",
+            })
+            heatmap = alt.Chart(sensitivity_frame).mark_rect(cornerRadius=3).encode(
+                x=alt.X("误拦成本:O", title="误拦成本假设"),
+                y=alt.Y("金额损失倍率:O", title="欺诈金额损失倍率"),
+                color=alt.Color("测试成本:Q", scale=alt.Scale(scheme="redyellowgreen", reverse=True), title="模拟成本"),
+                tooltip=[
+                    alt.Tooltip("金额损失倍率:Q"),
+                    alt.Tooltip("误拦成本:Q"),
+                    alt.Tooltip("测试成本:Q", format=",.2f"),
+                ],
+            ).properties(height=180)
+            st.altair_chart(heatmap, width="stretch")
+            show_table(sensitivity_frame)
 
 
 def show_explain(report: dict) -> None:
@@ -542,7 +635,8 @@ if not REPORT.exists():
 
 report = json.loads(REPORT.read_text(encoding="utf-8"))
 metrics = report["测试集指标"]
-scores = pd.read_csv(ROOT / "reports" / "test_scores.csv")
+score_file = ROOT / "reports" / "test_scores.csv"
+scores = pd.read_csv(score_file) if not report.get("看板分箱") and score_file.exists() else pd.DataFrame(columns=["欺诈标签", "风险分数"])
 profile = pd.read_csv(ROOT / "reports" / "hour_profile.csv")
 
 with st.sidebar:
@@ -565,7 +659,7 @@ else:
 if nav == "数据概览":
     show_overview(report, metrics, scores, profile)
 elif nav == "模型比较":
-    show_models(report, metrics)
+    show_models(report, metrics, scores)
 elif nav == "风险策略":
     show_policy(report)
 elif nav == "特征解释":

@@ -42,15 +42,16 @@ def test_policy_groups_keep_results_readable_and_complete():
             table = TableReader()
             table.feed(item.value)
             tables.append(table)
-    assert tables and all(table.headers == ["指标", "结果"] for table in tables[:-1])
-    rows = [dict(zip(table.cells[::2], table.cells[1::2])) for table in tables[:-1]]
+    policy_tables = [table for table in tables if table.headers == ["指标", "结果"]]
+    assert len(policy_tables) >= 6
+    rows = [dict(zip(table.cells[::2], table.cells[1::2])) for table in policy_tables]
     validation = {key: value for row in rows[:3] for key, value in row.items()}
-    test = {key: value for row in rows[3:] for key, value in row.items()}
+    test = {key: value for row in rows[3:6] for key, value in row.items()}
     as_count = lambda value: int(value.replace(",", ""))
     assert sum(as_count(validation[key]) for key in ("放行笔数", "复核笔数", "拦截笔数")) == report["时间切分"]["验证集"]
     assert sum(as_count(test[key]) for key in ("放行笔数", "复核笔数", "拦截笔数")) == report["时间切分"]["测试集"]
     assert "复核率" in validation and "模拟成本" in validation
-    assert "相对全部放行成本变化" in test
+    assert "相对全部放行成本变化" in rows[6]
     captions = "\n".join(item.value for item in app.caption)
     assert f"{report['验证集选定策略']['复核阈值']:.7f}" in captions
 
@@ -66,6 +67,18 @@ def test_analysis_pages_show_sql_rolling_validation_and_ablation():
     assert "滚动验证 AP" in markdown
     assert "金额对数特征消融" in markdown
     assert not app.exception
+
+
+def test_cloud_charts_do_not_require_per_transaction_scores(monkeypatch):
+    original = Path.exists
+    monkeypatch.setattr(Path, "exists", lambda path: False if path.name == "test_scores.csv" else original(path))
+    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
+    app.run(timeout=30)
+    assert not app.exception
+    assert not any("逐笔测试分数" in item.value for item in app.info)
+    app.sidebar.radio[0].set_value("模型比较").run(timeout=30)
+    assert not app.exception
+    assert not any("无法绘制可靠性曲线" in item.value for item in app.info)
 
 
 @pytest.mark.parametrize("mode", ["ai", "offline", "offline-fallback"])

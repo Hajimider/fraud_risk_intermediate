@@ -1,0 +1,14 @@
+{
+  "生成时间": "2026-11-14T11:46:33.838379+00:00",
+  "报告SHA256": "f5364bd19cdfffb70b9fe11940ca4e8f9a3287be8f4c7bb5e289d60a834cab2d",
+  "图片": [
+    "dashboard-overview.png",
+    "dashboard-sql.png",
+    "dashboard-models.png",
+    "dashboard-ablation.png",
+    "dashboard-policy.png",
+    "dashboard-features.png",
+    "dashboard-ai.png"
+  ],
+  "来源": "当前dashboard.py实际浏览器渲染；AI页使用当前报告真实离线摘要，不调用外部接口；非线上部署验收"
+}

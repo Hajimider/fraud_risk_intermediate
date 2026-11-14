@@ -36,7 +36,6 @@ data/**/*.7z
 /reports/*
 !/reports/.gitkeep
 !/reports/latest.json
-!/reports/test_scores.csv
 !/reports/hour_profile.csv
 
 # 日志、备份和临时文件

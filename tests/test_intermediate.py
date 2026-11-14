@@ -1,12 +1,14 @@
 import numpy as np
-import pandas as pd
 
 from fraud_model import (
     build_features,
+    choose_policy,
     cost_of_actions,
     make_demo_data,
+    paired_ap_difference_interval,
     rolling_time_splits,
     run,
+    stratified_bootstrap_intervals,
     time_split,
 )
 
@@ -72,10 +74,42 @@ def test_review_is_not_assumed_perfect():
 
 
 def test_policy_keeps_a_real_review_band():
-    from fraud_model import choose_policy
     result = choose_policy([0, 1, 0, 1, 0, 0], [.1, .95, .4, .7, .2, .3], review_capacity=.5)
     assert result["复核阈值"] < result["拦截阈值"]
     assert result["复核笔数"] > 0 and result["拦截笔数"] > 0
+
+
+def test_full_threshold_search_matches_brute_force_with_amount_costs():
+    y = np.array([0, 1, 0, 1, 0, 0, 1, 0])
+    scores = np.array([.1, .9, .4, .7, .2, .3, .8, .6])
+    amounts = np.array([4, 12, 3, 200, 7, 1, 5, 18])
+    actual = choose_policy(y, scores, review_capacity=.5, amounts=amounts)
+    thresholds = np.unique(np.r_[scores, np.nextafter(scores.max(), np.inf)])
+    expected = min(
+        (cost_of_actions(y, scores, low, high, review_capacity=.5, amounts=amounts)
+         for i, low in enumerate(thresholds[:-1]) for high in thresholds[i + 1:]
+         if 0 < ((scores >= low) & (scores < high)).sum()
+         and ((scores >= low) & (scores < high)).mean() <= .5
+         and (scores >= high).any()),
+        key=lambda row: (row["模拟成本"], row["复核率"]),
+    )
+    assert np.isclose(actual["模拟成本"], expected["模拟成本"])
+
+
+def test_stratified_bootstrap_returns_finite_intervals():
+    y = np.array([0] * 20 + [1] * 4)
+    scores = np.r_[np.linspace(.01, .2, 20), [.8, .9, .7, .6]]
+    amounts = np.ones(len(y))
+    intervals = stratified_bootstrap_intervals(y, scores, amounts, .4, .75, iterations=40)
+    assert set(intervals) == {"平均精确率AP", "ROC-AUC", "精确率", "召回率", "模拟成本"}
+    assert all(np.isfinite(bounds).all() and bounds[0] <= bounds[1] for bounds in intervals.values())
+
+
+def test_paired_ap_interval_contains_identical_model_difference():
+    y = [0] * 20 + [1] * 4
+    scores = np.linspace(0, 1, len(y))
+    low, high = paired_ap_difference_interval(y, scores, scores, iterations=40)
+    assert low == high == 0
 
 
 def test_train_path_does_not_silently_use_demo_data(tmp_path):
@@ -91,7 +125,7 @@ def test_train_path_does_not_silently_use_demo_data(tmp_path):
 def test_demo_run_writes_report(tmp_path, monkeypatch):
     import fraud_model
     monkeypatch.setattr(fraud_model, "ROOT", tmp_path)
-    report = run(rows=12000, trees=12)
+    report = run(rows=12000, trees=12, sql_backend="duckdb", tuning_trials=1, bootstrap_iterations=40)
     assert report["数据来源"] == "合成教学数据"
     assert report["验证集选定模型"] in {
         "类别加权逻辑回归",
@@ -99,7 +133,10 @@ def test_demo_run_writes_report(tmp_path, monkeypatch):
         "类别加权XGBoost（移除LogAmount）",
     }
     assert len(report["滚动验证窗口"]) == 3
-    assert len(report["特征消融"]) == 3
+    assert len(report["特征消融"]) == 18
+    assert report["金额特征方案"] != "both" or "XGBoost" in report["验证集选定模型"]
+    assert len(report["校准方案比较"]) == 4
+    assert len(report["看板分箱"]["分数分布"]) == 10
     assert all("平均AP" in row and "AP标准差" in row for row in report["模型比较"])
     assert report["SQL数据画像"]["交易总数"] == 12000
     assert (tmp_path / "reports" / "latest.json").exists()
