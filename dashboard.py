@@ -357,7 +357,7 @@ def show_overview(report: dict, metrics: dict, scores: pd.DataFrame, profile: pd
             st.altair_chart(hourly_chart(profile, "平均金额", "#2563eb", "平均金额"), width="stretch")
     sql_profile = report["SQL数据画像"]
     with st.container(border=True):
-        panel_title("SQL 数据画像", f"{report['SQL数据画像'].get('执行后端', 'mysql').replace('mysql', 'MySQL').replace('duckdb', 'DuckDB')} 执行分组统计；重复记录保留")
+        panel_title("SQL 数据画像", "MySQL 执行分组统计；重复记录保留")
         quality_left, quality_right = st.columns(2)
         with quality_left:
             show_table(pd.DataFrame([

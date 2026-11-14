@@ -303,6 +303,6 @@ def classification_metrics(y_true, scores, threshold=0.5):
     }
 
 
-def run(data_path=None, rows=12000, trees=80, seed=42, sql_backend="mysql", output_dir=None, tuning_trials=3, bootstrap_iterations=1000):
+def run(data_path=None, rows=12000, trees=80, seed=42, output_dir=None, tuning_trials=3, bootstrap_iterations=1000):
     from experiments import run_experiment
-    return run_experiment(data_path, rows, trees, seed, sql_backend, output_dir or ROOT / "reports", tuning_trials, bootstrap_iterations)
+    return run_experiment(data_path, rows, trees, seed, output_dir or ROOT / "reports", tuning_trials, bootstrap_iterations)

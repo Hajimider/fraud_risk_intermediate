@@ -4,7 +4,7 @@
 
 本地只有ULB原始数据。IEEE模块已实现，并在明确构造的合成数据上验证：数据接入、来源SHA-256、MySQL窗口、防同刻/未来/未成熟标签泄漏、WOE/IV、PSI以及完整实验入口。合成结果不进入README核心数字，不表示真实IEEE训练完成。
 
-必须先从Kaggle获取本人有权使用的数据并接受比赛的数据条款。项目不自动登录、下载或代替用户接受协议。
+原始CSV受Kaggle比赛规则约束，不随仓库分发。请先登录有权使用数据的Kaggle账号，在[比赛数据页](https://www.kaggle.com/competitions/ieee-fraud-detection/data)接受比赛规则并下载`train_transaction.csv`、`train_identity.csv`，将两个文件放入`data/ieee/`。项目不自动登录或代替用户接受协议；文件也已加入Git忽略规则，不会随代码提交。
 
 ## 运行
 

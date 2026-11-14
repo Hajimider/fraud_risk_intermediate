@@ -18,7 +18,6 @@ def main():
     train.add_argument("--data", default=str(ROOT / "data" / "creditcard.csv"))
     train.add_argument("--trees", type=int, default=160)
     for command in (demo, train):
-        command.add_argument("--sql-backend", choices=("mysql", "duckdb"), default="mysql", help="默认MySQL；duckdb可免服务演示")
         command.add_argument("--output-dir", default="reports", help="实验输出目录，避免覆盖已有结果")
         command.add_argument("--tuning-trials", type=int, choices=(1, 2, 3), default=3)
         command.add_argument("--bootstrap-iterations", type=int, default=1000)
@@ -55,7 +54,7 @@ def main():
         )
         return
 
-    options = dict(trees=args.trees, sql_backend=args.sql_backend, output_dir=args.output_dir,
+    options = dict(trees=args.trees, output_dir=args.output_dir,
                    tuning_trials=args.tuning_trials, bootstrap_iterations=args.bootstrap_iterations)
     if args.command == "demo":
         report = run(rows=args.rows, **options)

@@ -122,7 +122,7 @@ def sensitivity_analysis(validation, validation_score, test, test_score, paramet
     return rows
 
 
-def run_experiment(data_path, rows, trees, seed, sql_backend, output_dir, tuning_trials, bootstrap_iterations):
+def run_experiment(data_path, rows, trees, seed, output_dir, tuning_trials, bootstrap_iterations):
     if tuning_trials not in (1, 2, 3):
         raise ValueError("调参预算支持1、2、3个候选；两类模型始终使用相同预算")
     if bootstrap_iterations < 1 or trees < 1:
@@ -142,7 +142,7 @@ def run_experiment(data_path, rows, trees, seed, sql_backend, output_dir, tuning
     frame = frame[columns].apply(pd.to_numeric, errors="coerce")
     if not np.isfinite(frame.to_numpy()).all() or not frame.Class.isin([0, 1]).all():
         raise ValueError("数据必须为无缺失有限数值，Class必须为0/1")
-    summary, profile = analyze_transactions(frame, backend=sql_backend)
+    summary, profile = analyze_transactions(frame)
     windows, test = rolling_time_splits(frame)
     configurations = {
         "logistic": [{"C": value} for value in (.1, 1., 10.)][:tuning_trials],

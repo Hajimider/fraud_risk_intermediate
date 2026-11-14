@@ -110,34 +110,22 @@ def wilson_interval(successes: int, total: int, z: float = 1.96) -> tuple[float,
     return lower, 1.0 if successes == total else upper
 
 
-def analyze_transactions(frame: pd.DataFrame, backend="mysql") -> tuple[dict, pd.DataFrame]:
+def analyze_transactions(frame: pd.DataFrame) -> tuple[dict, pd.DataFrame]:
     """执行项目 SQL 文件并返回报告摘要与按相对小时统计的结果。"""
     missing_columns = set(ANALYSIS_COLUMNS) - set(frame.columns)
     if missing_columns:
         raise ValueError(f"SQL分析缺少字段：{', '.join(sorted(missing_columns))}")
 
-    if backend not in ("mysql", "duckdb"):
-        raise ValueError("SQL后端必须为mysql或duckdb")
     if frame.empty:
         raise ValueError("交易表不能为空")
-    connection = connect_mysql() if backend == "mysql" else None
+    connection = connect_mysql()
     try:
-        if backend == "mysql":
-            load_transactions(connection, frame)
-            missing_expression = " + ".join(f"COUNT(*) - COUNT(`{column}`)" for column in ANALYSIS_COLUMNS)
-            with connection.cursor() as cursor:
-                cursor.execute(f"SELECT {missing_expression} FROM transactions")
-                missing_count = cursor.fetchone()[0]
-            summary_rows, duplicate_rows, amount_rows, profile = execute_queries(connection, SQL_FILE)
-        else:
-            import duckdb
-            connection = duckdb.connect(":memory:")
-            connection.register("transactions", frame[ANALYSIS_COLUMNS])
-            statements = SQL_FILE.read_text(encoding="utf-8").replace("`", '"').split(";")
-            summary_rows, duplicate_rows, amount_rows, profile = [
-                connection.execute(statement).fetchdf() for statement in statements if statement.strip()
-            ]
-            missing_count = int(frame[ANALYSIS_COLUMNS].isna().sum().sum())
+        load_transactions(connection, frame)
+        missing_expression = " + ".join(f"COUNT(*) - COUNT(`{column}`)" for column in ANALYSIS_COLUMNS)
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT {missing_expression} FROM transactions")
+            missing_count = cursor.fetchone()[0]
+        summary_rows, duplicate_rows, amount_rows, profile = execute_queries(connection, SQL_FILE)
         summary = summary_rows.iloc[0]
         duplicate = duplicate_rows.iloc[0]
         amount_rows = amount_rows.rename(columns={
@@ -156,8 +144,7 @@ def analyze_transactions(frame: pd.DataFrame, backend="mysql") -> tuple[dict, pd
             "mean_amount": "平均金额",
         })
     finally:
-        if connection is not None:
-            connection.close()
+        connection.close()
 
     for column in amount_rows.columns:
         amount_rows[column] = pd.to_numeric(amount_rows[column])
@@ -188,6 +175,6 @@ def analyze_transactions(frame: pd.DataFrame, backend="mysql") -> tuple[dict, pd
         "重复行数": int(duplicate["duplicate_rows"] or 0),
         "重复中的欺诈行数": int(duplicate["duplicate_fraud_rows"] or 0),
         "相对小时欺诈率卡方检验": chi_test,
-        "执行后端": backend,
+        "执行后端": "mysql",
         "金额分布": amount_rows.to_dict(orient="records"),
     }, profile

@@ -52,18 +52,20 @@ def test_aggregate_bins_preserve_all_samples_including_constant_scores():
         assert sum(row["交易笔数"] * row["实际欺诈比例"] for row in bins) == pytest.approx(10)
 
 
-def test_sql_backends_have_identical_summary_and_quantiles():
+def test_mysql_summary_and_quantiles_match_input_data():
     frame = make_demo_data(500)
     frame.loc[0, "Amount"] = np.nan
     frame = pd.concat([frame, frame.iloc[[2]]], ignore_index=True)
-    mysql, mysql_profile = analyze_transactions(frame, backend="mysql")
-    embedded, embedded_profile = analyze_transactions(frame, backend="duckdb")
-    for result in (mysql, embedded):
-        result.pop("执行后端")
-    assert mysql["缺失值总数"] == embedded["缺失值总数"] == 1
-    pd.testing.assert_frame_equal(pd.DataFrame(mysql.pop("金额分布")), pd.DataFrame(embedded.pop("金额分布")), check_dtype=False)
-    assert mysql == embedded
-    pd.testing.assert_frame_equal(mysql_profile, embedded_profile, check_dtype=False)
+    summary, profile = analyze_transactions(frame)
+    assert summary["执行后端"] == "mysql"
+    assert summary["交易总数"] == len(frame)
+    assert summary["缺失值总数"] == 1
+    assert summary["重复行数"] == 1
+    assert profile["交易笔数"].sum() == len(frame)
+    for row in summary["金额分布"]:
+        amounts = frame.loc[frame.Class == row["欺诈标签"], "Amount"]
+        for key, q in (("金额P25", .25), ("金额中位数", .5), ("金额P75", .75), ("金额P90", .9)):
+            assert row[key] == pytest.approx(amounts.quantile(q))
 
 
 def test_report_contains_cloud_charts_and_no_machine_paths():

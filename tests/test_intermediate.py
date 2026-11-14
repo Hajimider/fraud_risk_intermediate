@@ -125,7 +125,7 @@ def test_train_path_does_not_silently_use_demo_data(tmp_path):
 def test_demo_run_writes_report(tmp_path, monkeypatch):
     import fraud_model
     monkeypatch.setattr(fraud_model, "ROOT", tmp_path)
-    report = run(rows=12000, trees=12, sql_backend="duckdb", tuning_trials=1, bootstrap_iterations=40)
+    report = run(rows=12000, trees=12, tuning_trials=1, bootstrap_iterations=40)
     assert report["数据来源"] == "合成教学数据"
     assert report["验证集选定模型"] in {
         "类别加权逻辑回归",
