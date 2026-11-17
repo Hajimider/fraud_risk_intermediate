@@ -10,7 +10,7 @@
 [![Tests](https://img.shields.io/badge/Pytest-60%20passed-0A9EDC?logo=pytest&logoColor=white)](tests/)
 [![Ruff](https://img.shields.io/badge/Ruff-checked-261230?logo=ruff&logoColor=white)](pyproject.toml)
 
-[快速开始](#快速开始) · [实验流程](#实验流程) · [看板与结果复盘](#看板与结果复盘) · [数据与决策口径](#数据与决策口径) · [完整报告 JSON](reports/latest.json) · [业务分析](docs/业务分析报告.md) · [面试问答](docs/面试问答与简历要点.md)
+[在线演示](https://fraudriskintermediate-bhchmyg9q2x5er9pewqgju.streamlit.app/) · [快速开始](#快速开始) · [实验流程](#实验流程) · [看板与结果复盘](#看板与结果复盘) · [数据与决策口径](#数据与决策口径) · [完整报告 JSON](reports/latest.json) · [业务分析](docs/业务分析报告.md) · [面试问答](docs/面试问答与简历要点.md)
 
 </div>
 
@@ -41,6 +41,8 @@
 ### 1. 直接打开结果看板
 
 仓库已经提交了跑好的实验报告（`reports/latest.json`）和小时画像（`reports/hour_profile.csv`），不用先装数据库或下载原始 CSV，装完依赖就能直接打开看板：
+
+也可以直接访问部署好的 [Streamlit 在线演示](https://fraudriskintermediate-bhchmyg9q2x5er9pewqgju.streamlit.app/)。
 
 ```bash
 python -m pip install -r requirements.txt
