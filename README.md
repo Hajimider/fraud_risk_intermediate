@@ -42,7 +42,7 @@
 
 仓库已经提交了跑好的实验报告（`reports/latest.json`）和小时画像（`reports/hour_profile.csv`），不用先装数据库或下载原始 CSV，装完依赖就能直接打开看板：
 
-也可以直接访问部署好的 [Streamlit 在线演示](https://fraudriskintermediate-bhchmyg9q2x5er9pewqgju.streamlit.app/)。
+也可以直接访问部署好的 [Streamlit 在线演示](https://fraudriskintermediate.streamlit.app/)。
 
 ```bash
 python -m pip install -r requirements.txt
