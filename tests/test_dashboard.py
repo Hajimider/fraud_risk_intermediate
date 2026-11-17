@@ -1,11 +1,12 @@
-from html.parser import HTMLParser
 import json
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
 import ai_assistant
+
 
 class TableReader(HTMLParser):
     def __init__(self):
@@ -44,10 +45,11 @@ def test_policy_groups_keep_results_readable_and_complete():
             tables.append(table)
     policy_tables = [table for table in tables if table.headers == ["指标", "结果"]]
     assert len(policy_tables) >= 6
-    rows = [dict(zip(table.cells[::2], table.cells[1::2])) for table in policy_tables]
+    rows = [dict(zip(table.cells[::2], table.cells[1::2], strict=False)) for table in policy_tables]
     validation = {key: value for row in rows[:3] for key, value in row.items()}
     test = {key: value for row in rows[3:6] for key, value in row.items()}
-    as_count = lambda value: int(value.replace(",", ""))
+    def as_count(value):
+        return int(value.replace(",", ""))
     assert sum(as_count(validation[key]) for key in ("放行笔数", "复核笔数", "拦截笔数")) == report["时间切分"]["验证集"]
     assert sum(as_count(test[key]) for key in ("放行笔数", "复核笔数", "拦截笔数")) == report["时间切分"]["测试集"]
     assert "复核率" in validation and "模拟成本" in validation
@@ -110,7 +112,7 @@ def test_ai_answer_survives_navigation_without_another_request(monkeypatch, mode
     assert app.text_area(key="ai_question").value == "请分析当前复核率"
     assert calls == ["请分析当前复核率"]
 
-    app.selectbox(key="ai_example").set_value("测试集指标说明了什么？").run(timeout=30)
+    app.button(key="ai_chip_1").click().run(timeout=30)
     assert app.text_area(key="ai_question").value == "测试集指标说明了什么？"
     assert calls == ["请分析当前复核率"]
     app.button(key="ai_submit").click().run(timeout=30)

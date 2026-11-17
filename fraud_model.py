@@ -1,7 +1,7 @@
 """按时间切分交易数据，比较模型并评估双阈值策略。"""
 
 from collections import deque
-from dataclasses import dataclass, asdict, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -15,7 +15,6 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-
 
 ROOT = Path(__file__).resolve().parent
 RAW_FEATURES = ["Amount", *[f"V{i}" for i in range(1, 29)]]
@@ -69,7 +68,7 @@ def rolling_time_splits(frame):
     ordered = frame.sort_values("Time", kind="stable").reset_index(drop=True)
     times = np.sort(ordered["Time"].unique())
     boundaries = [int(len(times) * ratio) for ratio in ROLLING_RATIOS]
-    if len(times) < 10 or any(a >= b for a, b in zip([0, *boundaries[:-1]], boundaries)):
+    if len(times) < 10 or any(a >= b for a, b in zip([0, *boundaries[:-1]], boundaries, strict=False)):
         raise ValueError("滚动验证至少需要10个不同交易时间")
 
     windows = []
@@ -203,8 +202,8 @@ def choose_policy(y_true, scores, review_capacity=None, amounts=None, cost_param
     base = float(allow_cost.sum())
     candidates = deque()
     next_review = 0
-    for block_threshold, block_start in zip(thresholds[1:], starts[1:]):
-        if block_start >= len(y):
+    for block_threshold, block_start in zip(thresholds, starts, strict=False):
+        if block_start > len(y):
             break
         while next_review < len(starts) and starts[next_review] < block_start:
             idx = int(starts[next_review])
@@ -216,30 +215,39 @@ def choose_policy(y_true, scores, review_capacity=None, amounts=None, cost_param
         min_start = block_start - cap
         while candidates and starts[candidates[0]] < min_start:
             candidates.popleft()
-        if not candidates:
-            continue
-        review_idx = candidates[0]
-        review_start = int(starts[review_idx])
-        if review_start >= block_start:
-            continue
-        incremental = review_prefix[block_start] - review_prefix[review_start]
-        block_increment = block_prefix[-1] - block_prefix[block_start]
-        total_cost = base + incremental + block_increment
-        review_count = block_start - review_start
-        row = {
-            "复核阈值": float(thresholds[review_idx]),
-            "拦截阈值": float(block_threshold),
-            "放行笔数": review_start,
-            "复核笔数": review_count,
-            "拦截笔数": len(y) - block_start,
-            "复核率": review_count / len(y),
-            "是否超出复核容量": review_count / len(y) > parameters.review_capacity,
-            "模拟成本": float(total_cost),
-        }
-        if not row["复核笔数"] or not row["拦截笔数"]:
-            continue
-        if best is None or (row["模拟成本"], row["复核率"]) < (best["模拟成本"], best["复核率"]):
-            best = row
+        if candidates:
+            review_idx = candidates[0]
+            review_start = int(starts[review_idx])
+            incremental = review_prefix[block_start] - review_prefix[review_start]
+            block_increment = block_prefix[-1] - block_prefix[block_start]
+            total_cost = base + incremental + block_increment
+            review_count = block_start - review_start
+            row = {
+                "复核阈值": float(thresholds[review_idx]),
+                "拦截阈值": float(block_threshold),
+                "放行笔数": review_start,
+                "复核笔数": review_count,
+                "拦截笔数": len(y) - block_start,
+                "复核率": review_count / len(y),
+                "是否超出复核容量": review_count / len(y) > parameters.review_capacity,
+                "模拟成本": float(total_cost),
+            }
+            if row["复核笔数"] or row["拦截笔数"]:
+                if best is None or (row["模拟成本"], row["复核率"]) < (best["模拟成本"], best["复核率"]):
+                    best = row
+        if block_start < len(y):
+            zero_review = {
+                "复核阈值": float(block_threshold),
+                "拦截阈值": float(block_threshold),
+                "放行笔数": block_start,
+                "复核笔数": 0,
+                "拦截笔数": len(y) - block_start,
+                "复核率": 0.0,
+                "是否超出复核容量": False,
+                "模拟成本": float(base + block_prefix[-1] - block_prefix[block_start]),
+            }
+            if best is None or (zero_review["模拟成本"], zero_review["复核率"]) < (best["模拟成本"], best["复核率"]):
+                best = zero_review
     if best is None:
         raise ValueError("没有满足复核容量的策略")
     return {
@@ -248,11 +256,82 @@ def choose_policy(y_true, scores, review_capacity=None, amounts=None, cost_param
     }
 
 
+def expected_loss_policy(
+    y_true, scores, amounts, cost_params=None, review_capacity=None,
+    shadow_price=None, **overrides
+):
+    """按逐笔概率与金额最小化期望损失，并约束复核容量。
+
+    ``shadow_price`` 由验证集搜索后可冻结传入测试集，避免按测试集分布重新配额。
+    """
+    if review_capacity is not None:
+        overrides["review_capacity"] = review_capacity
+    parameters = replace(cost_params or CostParameters(), **overrides)
+    y, score, allow_cost, review_cost, block_cost = action_cost_arrays(y_true, scores, amounts, parameters)
+    probability = np.clip(score.astype(float), 0.0, 1.0)
+    loss = np.maximum(np.asarray(amounts, dtype=float), parameters.min_fraud_loss) * parameters.fraud_loss_multiplier
+    review_base = (
+        probability * loss * (1 - parameters.review_recall)
+        + (1 - probability) * parameters.review_false_positive_rate * parameters.false_block_cost
+        + parameters.review_cost
+    )
+    allow_expected = probability * loss
+    block_expected = (1 - probability) * parameters.false_block_cost
+
+    def actions(lambda_price):
+        costs = np.column_stack((allow_expected, review_base + lambda_price, block_expected))
+        return np.argmin(costs, axis=1)
+
+    if shadow_price is None:
+        actions_at_zero = actions(0.0)
+        capacity = parameters.review_capacity
+        if (actions_at_zero == 1).mean() <= capacity:
+            shadow_price = 0.0
+        else:
+            upper = float(max(np.max(loss), parameters.false_block_cost, parameters.review_cost, 1.0) * 2)
+            while (actions(upper) == 1).mean() > capacity and upper < 1e12:
+                upper *= 2
+            lower = 0.0
+            for _ in range(60):
+                middle = (lower + upper) / 2
+                if (actions(middle) == 1).mean() > capacity:
+                    lower = middle
+                else:
+                    upper = middle
+            shadow_price = upper
+    elif not np.isfinite(shadow_price) or shadow_price < 0:
+        raise ValueError("冻结影子价格必须是非负有限数")
+    chosen = actions(shadow_price)
+    action_names = np.array(["放行", "复核", "拦截"])
+    selected = action_names[chosen]
+    review = selected == "复核"
+    block = selected == "拦截"
+    missed_mask = (selected == "放行") & (y == 1)
+    reviewed_fraud = review & (y == 1)
+    fraud_cost = float(allow_cost[missed_mask].sum() + allow_cost[reviewed_fraud].sum() * (1 - parameters.review_recall))
+    missed = int(missed_mask.sum()) + int(reviewed_fraud.sum()) * (1 - parameters.review_recall)
+    false_blocks = float((block & (y == 0)).sum() + (review & (y == 0)).sum() * parameters.review_false_positive_rate)
+    cost = float(allow_cost[selected == "放行"].sum() + review_cost[review].sum() + block_cost[block].sum())
+    return {
+        "策略类型": "期望损失策略",
+        "容量影子价格λ": float(shadow_price),
+        "放行笔数": int((selected == "放行").sum()),
+        "复核笔数": int(review.sum()),
+        "拦截笔数": int(block.sum()),
+        "预计漏放欺诈": float(missed),
+        "预计误拦正常": false_blocks,
+        "复核率": float(review.mean()),
+        "是否超出复核容量": bool(review.mean() > parameters.review_capacity),
+        "模拟成本": cost,
+        "漏放损失金额": fraud_cost,
+    }
+
+
 
 
 def stratified_bootstrap_intervals(
     y_true, scores, amounts, review_threshold, block_threshold,
-    iterations=1000, seed=42,
+    iterations=1000, seed=42, cost_params=None,
 ):
     """按类别分层重采样，返回测试指标和冻结策略成本的百分位区间。"""
     y = np.asarray(y_true, dtype=int)
@@ -264,7 +343,8 @@ def stratified_bootstrap_intervals(
     for _ in range(iterations):
         idx = np.r_[rng.choice(groups[0], len(groups[0]), replace=True), rng.choice(groups[1], len(groups[1]), replace=True)]
         metric = classification_metrics(y[idx], score[idx], threshold=review_threshold)
-        cost = cost_of_actions(y[idx], score[idx], review_threshold, block_threshold, amounts=amount[idx])
+        cost = cost_of_actions(y[idx], score[idx], review_threshold, block_threshold,
+                               amounts=amount[idx], cost_params=cost_params)
         for key in samples:
             samples[key].append(metric.get(key) if key != "模拟成本" else cost[key])
     return {

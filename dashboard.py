@@ -38,19 +38,16 @@ st.markdown(
     [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background:rgba(255,255,255,.09); }
     [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] { gap:.2rem; }
     .block-container { max-width:1440px; padding-top:2.2rem; padding-bottom:3rem; }
-    [data-testid="stMetric"] { background:#fff; border:1px solid var(--line); border-radius:6px; padding:1rem 1.1rem; box-shadow:0 2px 8px rgba(16,42,67,.04); }
-    [data-testid="stMetricLabel"] { color:var(--muted); font-size:.78rem; }
-    [data-testid="stMetricValue"] { color:var(--navy); font-variant-numeric:tabular-nums; }
     div[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--line); border-radius:6px; background:#fff; box-sizing:border-box; max-width:100%; min-width:0; overflow:hidden; }
     [data-testid="stHorizontalBlock"], [data-testid="column"] { min-width:0 !important; max-width:100% !important; }
     [data-testid="column"] { overflow:hidden; }
     [data-testid="stMarkdownContainer"] { min-width:0; max-width:100%; }
     .brand { padding:.6rem .25rem 1.6rem; }
-    .brand-mark { width:54px; height:36px; display:inline-flex; align-items:center; justify-content:center; background:#e7eff7; color:var(--navy); border-radius:6px; font-weight:800; margin-bottom:.75rem; font-size:.84rem; }
+    .brand-icon { width:20px; height:20px; flex:none; }
     .brand-title { font-size:1.05rem; font-weight:700; line-height:1.35; }
     .brand-subtitle { color:#a9bed0; font-size:.74rem; margin-top:.25rem; line-height:1.45; }
-    .eyebrow { color:var(--teal); font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; margin-bottom:.35rem; }
-    .page-title { color:var(--navy); font-size:2rem; font-weight:750; letter-spacing:-.02em; margin:0; }
+    .eyebrow { color:var(--teal); font-size:.72rem; font-weight:700; letter-spacing:0; text-transform:uppercase; margin-bottom:.35rem; }
+    .page-title { color:var(--navy); font-size:2rem; font-weight:750; letter-spacing:0; margin:0; }
     .page-subtitle { color:var(--muted); margin:.35rem 0 1.4rem; font-size:.92rem; }
     .status-bar { display:flex; flex-wrap:wrap; gap:.55rem; align-items:center; margin:.1rem 0 1.2rem; }
     .status { display:inline-flex; align-items:center; gap:.35rem; border-radius:99px; padding:.28rem .62rem; font-size:.76rem; font-weight:650; border:1px solid transparent; }
@@ -60,17 +57,35 @@ st.markdown(
     .status-red { color:#8e1f1f; background:var(--red-soft); border-color:#f5b8b5; }
     .callout { border-left:4px solid var(--teal); background:#eaf7f5; padding:.8rem 1rem; border-radius:0 6px 6px 0; color:#164e4a; margin:.35rem 0 1.1rem; }
     .callout-warning { border-left-color:var(--amber); background:var(--amber-soft); color:#713b0b; }
-    .section-kicker { color:var(--muted); font-size:.76rem; font-weight:700; letter-spacing:.04em; margin:.25rem 0 .4rem; }
+    .section-kicker { color:var(--muted); font-size:.76rem; font-weight:700; letter-spacing:0; margin:.25rem 0 .4rem; }
     .finding { font-size:1.1rem; color:var(--navy); font-weight:700; line-height:1.45; margin:0 0 .35rem; }
     .small-note { color:var(--muted); font-size:.78rem; line-height:1.5; }
+    .kpi-card { background:#fff; border:1px solid var(--line); border-radius:6px; padding:1rem 1.1rem .9rem; box-shadow:0 2px 8px rgba(16,42,67,.05); overflow:hidden; position:relative; }
+    .kpi-card::before { content:""; position:absolute; top:0; left:0; right:0; height:4px; }
+    .kpi-card.kpi-blue::before { background:#1a56db; }
+    .kpi-card.kpi-teal::before { background:#0f766e; }
+    .kpi-card.kpi-amber::before { background:#d97706; }
+    .kpi-card.kpi-green::before { background:#059669; }
+    .kpi-card.kpi-red::before { background:#dc2626; }
+    .kpi-label { color:var(--muted); font-size:.74rem; font-weight:600; margin-bottom:.35rem; overflow-wrap:anywhere; }
+    .kpi-value { color:var(--navy); font-size:1.6rem; font-weight:750; line-height:1.15; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+    .kpi-delta { font-size:.78rem; font-weight:600; line-height:1.4; margin-top:.3rem; overflow-wrap:anywhere; }
+    .kpi-delta.up { color:#059669; }
+    .kpi-delta.down { color:#dc2626; }
+    .kpi-delta.neutral { color:var(--muted); }
+    .capacity-bar-wrap { background:#e1e9f0; border-radius:999px; height:8px; overflow:hidden; margin:.4rem 0 .6rem; }
+    .capacity-bar-fill { height:100%; border-radius:999px; }
+    .capacity-bar-fill.bar-teal { background:#0f766e; }
+    .capacity-bar-fill.bar-amber { background:#d97706; }
+    .capacity-bar-fill.bar-red { background:#dc2626; }
+    .sidebar-summary { display:flex; flex-direction:column; gap:.4rem; padding:.2rem 0; }
+    .sidebar-badge { width:fit-content; max-width:100%; background:#1a3a5c; color:#7ecfb2 !important; border-radius:4px; padding:.22rem .55rem; font-size:.74rem; font-weight:700; overflow-wrap:anywhere; }
     .st-key-experiment-summary [data-testid="stMarkdownContainer"] { margin-bottom:0 !important; }
     .summary-content { display:flex; flex-direction:column; justify-content:center; gap:.55rem; padding:.2rem 0; }
     .summary-content > * { margin:0 !important; }
     .table-title { color:var(--navy); font-weight:700; font-size:1rem; margin:.2rem 0 .55rem; }
     footer { visibility:hidden; }
-    [data-testid="stSelectbox"] [data-baseweb="select"] > div,
     [data-testid="stTextArea"] textarea { background:#fff !important; color:var(--ink) !important; border-color:var(--line) !important; }
-    [data-testid="stSelectbox"] [data-baseweb="select"] *,
     [data-testid="stTextArea"] textarea::placeholder { color:var(--ink) !important; }
     [data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#fff; }
     [data-testid="stVegaLiteChart"] { width:100% !important; max-width:100% !important; overflow:hidden; }
@@ -130,6 +145,27 @@ def panel_title(title: str, note: str | None = None) -> None:
         st.caption(note)
 
 
+def kpi_card(label: str, value: str, delta: str | None = None, delta_dir: str = "neutral", color: str = "blue") -> None:
+    delta_html = f'<div class="kpi-delta {delta_dir}">{html.escape(delta)}</div>' if delta else ""
+    st.markdown(
+        f'<div class="kpi-card kpi-{color}">'
+        f'<div class="kpi-label">{html.escape(label)}</div>'
+        f'<div class="kpi-value">{html.escape(value)}</div>'
+        f'{delta_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+SHIELD_SVG = (
+    '<svg class="brand-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" '
+    'aria-hidden="true" focusable="false">'
+    '<path d="M10 1.5L3 4.5V9.5C3 13.09 6.09 16.42 10 17.5C13.91 16.42 17 13.09 17 9.5V4.5L10 1.5Z" '
+    'fill="#0f766e" fill-opacity="0.9"/>'
+    '<path d="M8 10.5L9.5 12L12.5 9" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" '
+    'stroke-linejoin="round"/></svg>'
+)
+
+
 def show_table(frame: pd.DataFrame) -> None:
     """渲染浅色表格，避免系统深色主题覆盖表格配色。"""
     frame = frame.copy()
@@ -141,11 +177,16 @@ def show_table(frame: pd.DataFrame) -> None:
     rows = []
     for values in frame.itertuples(index=False, name=None):
         cells = []
-        for column, value in zip(frame.columns, values):
+        for column, value in zip(frame.columns, values, strict=False):
             if pd.isna(value):
                 display = "-"
             elif isinstance(value, float):
-                display = f"{value:,.4f}" if abs(value) < 1 else f"{value:,.2f}"
+                if 0 < abs(value) < 0.01:
+                    display = f"{value:.6f}"
+                elif abs(value) < 1:
+                    display = f"{value:,.4f}"
+                else:
+                    display = f"{value:,.2f}"
             elif isinstance(value, int):
                 display = f"{value:,}"
             else:
@@ -174,9 +215,9 @@ def chart_base(chart: alt.Chart, height: int = 260) -> alt.Chart:
         .configure(background="#ffffff", font="Arial, Microsoft YaHei, sans-serif")
         .configure_view(stroke="#e5edf4", fill="#ffffff")
         .configure_axis(
-            labelColor="#52667a", titleColor="#52667a", gridColor="#e2eaf1",
+            labelColor="#52667a", titleColor="#52667a", gridColor="#edf2f7",
             domainColor="#c7d9e8", tickColor="#c7d9e8",
-            labelFontSize=11, titleFontSize=11, gridOpacity=0.75,
+            labelFontSize=12, titleFontSize=11, titleFontWeight=600, gridOpacity=0.6,
         )
         .configure_title(color="#102a43", fontSize=13, anchor="start")
         .configure_legend(labelColor="#52667a", titleColor="#102a43", orient="top")
@@ -191,9 +232,12 @@ def risk_distribution_chart(scores: pd.DataFrame, aggregate=None) -> alt.Chart:
         .reset_index(name="交易笔数")
     )
     return chart_base(
-        alt.Chart(data).mark_bar(color="#0f766e", cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
-            x=alt.X("风险分数分箱:N", sort=None, axis=alt.Axis(title="风险分数区间", labelAngle=-35)),
-            y=alt.Y("交易笔数:Q", axis=alt.Axis(title="交易笔数")),
+        alt.Chart(data).mark_bar(color="#0f766e", cornerRadiusEnd=4).encode(
+            x=alt.X("交易笔数:Q", axis=alt.Axis(title="交易笔数", format=",")),
+            y=alt.Y(
+                "风险分数分箱:N", sort=None,
+                axis=alt.Axis(title="风险分数区间", labelFontSize=10, labelLimit=190),
+            ),
             tooltip=[
                 alt.Tooltip("风险分数分箱:N", title="风险区间"),
                 alt.Tooltip("交易笔数:Q", title="交易笔数", format=","),
@@ -207,7 +251,7 @@ def hourly_chart(profile: pd.DataFrame, field: str, color: str, title: str) -> a
     data = profile[["相对小时", field]].rename(columns={field: "数值"})
     line = alt.Chart(data).mark_line(
             color=color, strokeWidth=3,
-            point=alt.OverlayMarkDef(color=color, size=45),
+            point=alt.OverlayMarkDef(color=color, size=48, filled=True, stroke="#ffffff", strokeWidth=2),
         ).encode(
             x=alt.X("相对小时:Q", axis=alt.Axis(title="相对小时")),
             y=alt.Y("数值:Q", axis=alt.Axis(title=title, format=".2%" if "比例" in title else ",.0f")),
@@ -217,7 +261,7 @@ def hourly_chart(profile: pd.DataFrame, field: str, color: str, title: str) -> a
             ],
         )
     if "欺诈率下限" not in profile or "欺诈率上限" not in profile or field != "欺诈比例":
-        return chart_base(line, 220)
+        return chart_base(line, 180)
     band = alt.Chart(profile).mark_area(color=color, opacity=0.16).encode(
         x=alt.X("相对小时:Q", axis=alt.Axis(title="相对小时")),
         y=alt.Y("欺诈率下限:Q", axis=alt.Axis(title=title, format=".2%")),
@@ -230,7 +274,7 @@ def hourly_chart(profile: pd.DataFrame, field: str, color: str, title: str) -> a
             alt.Tooltip("欺诈率上限:Q", title="95%区间上限", format=".2%"),
         ],
     )
-    return chart_base(alt.layer(band, line), 220)
+    return chart_base(alt.layer(band, line), 180)
 
 
 def validation_chart(report: dict) -> alt.Chart:
@@ -242,7 +286,7 @@ def validation_chart(report: dict) -> alt.Chart:
     })
     order = [row["窗口"] for row in report["滚动验证窗口"]]
     chart = alt.Chart(data).mark_line(
-        point=alt.OverlayMarkDef(size=60), strokeWidth=2.5,
+        point=alt.OverlayMarkDef(size=48, filled=True, stroke="#ffffff", strokeWidth=2), strokeWidth=2.5,
     ).encode(
         x=alt.X("窗口:N", sort=order, axis=alt.Axis(title="时间窗口")),
         y=alt.Y("AP:Q", axis=alt.Axis(title="平均精确率 AP", format=".2f"), scale=alt.Scale(zero=True)),
@@ -320,25 +364,23 @@ def show_overview(report: dict, metrics: dict, scores: pd.DataFrame, profile: pd
             unsafe_allow_html=True,
         )
     st.write("")
-    cols = st.columns(4)
-    summaries = [
-        ("交易总数", f"{report['总笔数']:,}"),
-        ("欺诈笔数", f"{report['欺诈笔数']:,}"),
-        ("测试集 AP", num(metrics["平均精确率AP"])),
-        ("测试集 ROC-AUC", num(metrics["ROC-AUC"])),
+    brier_skill = metrics.get("Brier技能分")
+    review_rate = report["测试集冻结策略表现"]["复核率"]
+    capacity = report["成本假设"]["最大复核比例"]
+    kpi_specs = [
+        ("交易总数", f"{report['总笔数']:,}", None, "neutral", "blue"),
+        ("欺诈笔数", f"{report['欺诈笔数']:,}", None, "neutral", "blue"),
+        ("测试集 AP", num(metrics["平均精确率AP"]), None, "neutral", "teal"),
+        ("ROC-AUC", num(metrics["ROC-AUC"]), None, "neutral", "teal"),
+        ("Brier 技能分", f"{float(brier_skill):.1%}" if brier_skill is not None else "—", None, "neutral", "blue"),
+        ("测试复核率", f"{float(review_rate):.2%}", f"容量上限 {capacity:.0%}", "neutral", "green"),
     ]
-    for col, (label, value) in zip(cols, summaries):
+    cols = st.columns(6, gap="small")
+    for col, (label, value, delta, delta_dir, color) in zip(cols, kpi_specs, strict=False):
         with col:
-            st.metric(label, value)
-    left, right = st.columns([1.05, 1.35])
-    with left:
-        with st.container(border=True):
-            panel_title("数据切分", "按交易时间顺序划分，避免未来信息进入训练")
-            split = pd.DataFrame(report["时间切分"].items(), columns=["数据集", "交易笔数"])
-            split["数据集"] = split["数据集"].replace({"训练集": "训练", "验证集": "验证", "测试集": "测试"})
-            show_table(split)
-            st.markdown('<div class="small-note">衍生特征：' + "、".join(report["特征工程"]) + '</div>', unsafe_allow_html=True)
-    with right:
+            kpi_card(label, value, delta, delta_dir, color)
+    content_left, content_right = st.columns([1.1, 0.9], gap="medium")
+    with content_left:
         with st.container(border=True):
             panel_title("测试集风险分数分布", "验证集选定校准方案，仅代表当前离线样本表现")
             aggregate = report.get("看板分箱", {}).get("分数分布", [])
@@ -346,15 +388,19 @@ def show_overview(report: dict, metrics: dict, scores: pd.DataFrame, profile: pd
                 st.altair_chart(risk_distribution_chart(scores, aggregate), width="stretch")
             else:
                 st.info("未提供逐笔测试分数文件；汇总指标和策略报告仍可查看。")
-    with st.container(border=True):
-        panel_title("按相对时间统计", "相对小时从首笔交易起算，不对应真实钟点")
-        chart_left, chart_right = st.columns(2)
-        with chart_left:
-            st.caption("欺诈比例")
+    with content_right:
+        with st.container(border=True):
+            panel_title("欺诈率趋势", "相对小时从首笔交易起算")
             st.altair_chart(hourly_chart(profile, "欺诈比例", "#b45309", "欺诈比例"), width="stretch")
-        with chart_right:
-            st.caption("平均交易金额")
+        with st.container(border=True):
+            panel_title("平均交易金额趋势")
             st.altair_chart(hourly_chart(profile, "平均金额", "#2563eb", "平均金额"), width="stretch")
+    with st.container(border=True):
+        panel_title("数据切分", "按交易时间顺序划分，避免未来信息进入训练")
+        split = pd.DataFrame(report["时间切分"].items(), columns=["数据集", "交易笔数"])
+        split["数据集"] = split["数据集"].replace({"训练集": "训练", "验证集": "验证", "测试集": "测试"})
+        show_table(split)
+        st.markdown('<div class="small-note">衍生特征：' + "、".join(report["特征工程"]) + '</div>', unsafe_allow_html=True)
     sql_profile = report["SQL数据画像"]
     with st.container(border=True):
         panel_title("SQL 数据画像", "MySQL 执行分组统计；重复记录保留")
@@ -388,6 +434,24 @@ def show_models(report: dict, metrics: dict, scores: pd.DataFrame) -> None:
     page_header("模型评估", "模型比较与测试结果", "按三个扩展时间窗口比较 AP，最后15%只作一次测试评估")
     selected = report["验证集选定模型"]
     st.markdown('<div class="status-bar">' + status_html(f"验证集选定：{selected}", "green") + status_html("关注指标：平均精确率 / 召回率 / 精确率", "blue") + '</div>', unsafe_allow_html=True)
+    result_check = report.get("模型差异检验", {})
+    selection_note = result_check.get("选择依据", "")
+    brier_skill = metrics.get("Brier技能分")
+    with st.container(key="model-conclusion"):
+        st.markdown(
+            '<div class="section-kicker">验证集选型结论</div>'
+            f'<p class="finding">{html.escape(selected)}</p>'
+            + (f'<div class="small-note">{html.escape(selection_note)}</div>' if selection_note else ""),
+            unsafe_allow_html=True,
+        )
+        mc1, mc2, mc3 = st.columns(3, gap="small")
+        with mc1:
+            kpi_card("测试集 AP", num(metrics["平均精确率AP"]), color="teal")
+        with mc2:
+            kpi_card("ROC-AUC", num(metrics["ROC-AUC"]), color="blue")
+        with mc3:
+            brier_value = f"{float(brier_skill):.1%}" if brier_skill is not None else "—"
+            kpi_card("Brier 技能分", brier_value, color="blue")
     left, right = st.columns([1.2, 0.8])
     with left:
         with st.container(border=True):
@@ -432,8 +496,9 @@ def show_models(report: dict, metrics: dict, scores: pd.DataFrame) -> None:
         panel_title("测试集可靠性曲线", "测试标签仅用于校准结果的最终展示")
         aggregate = report.get("看板分箱", {}).get("可靠性曲线", [])
         if aggregate:
-            observed = [row["实际欺诈比例"] for row in aggregate]
-            predicted = [row["平均预测风险"] for row in aggregate]
+            reliability = pd.DataFrame(aggregate)
+            observed = reliability["实际欺诈比例"]
+            predicted = reliability["平均预测风险"]
         elif scores.empty:
             st.info("未提供逐笔测试分数文件，无法绘制可靠性曲线。")
             observed, predicted = [], []
@@ -441,20 +506,31 @@ def show_models(report: dict, metrics: dict, scores: pd.DataFrame) -> None:
             observed, predicted = calibration_curve(
                 scores["欺诈标签"], scores["风险分数"], n_bins=10, strategy="quantile",
             )
-        if len(observed):
             reliability = pd.DataFrame({
                 "平均预测风险": predicted,
                 "实际欺诈比例": observed,
             })
-            chart = alt.Chart(reliability).mark_line(point=True, color="#0f766e").encode(
-                x=alt.X("平均预测风险:Q", scale=alt.Scale(domain=[0, 1]), title="平均预测风险"),
-                y=alt.Y("实际欺诈比例:Q", scale=alt.Scale(domain=[0, 1]), title="实际欺诈比例"),
-                tooltip=[
-                    alt.Tooltip("平均预测风险:Q", format=".4f"),
-                    alt.Tooltip("实际欺诈比例:Q", format=".4f"),
-                ],
+        if len(observed):
+            max_value = max(
+                float(reliability[["平均预测风险", "实际欺诈比例"]].max().max()), 1e-4,
+            ) * 1.2
+            tooltip = [
+                alt.Tooltip("平均预测风险:Q", format=".3%"),
+                alt.Tooltip("实际欺诈比例:Q", format=".3%"),
+            ]
+            if "交易笔数" in reliability:
+                tooltip.append(alt.Tooltip("交易笔数:Q", title="箱内交易笔数", format=","))
+            chart = alt.Chart(reliability).mark_line(
+                point=alt.OverlayMarkDef(size=48, filled=True, stroke="#ffffff", strokeWidth=2),
+                color="#0f766e",
+            ).encode(
+                x=alt.X("平均预测风险:Q", scale=alt.Scale(domain=[0, max_value]),
+                        axis=alt.Axis(format=".3%"), title="平均预测风险"),
+                y=alt.Y("实际欺诈比例:Q", scale=alt.Scale(domain=[0, max_value]),
+                        axis=alt.Axis(format=".3%"), title="实际欺诈比例"),
+                tooltip=tooltip,
             )
-            reference = alt.Chart(pd.DataFrame({"x": [0, 1], "y": [0, 1]})).mark_line(
+            reference = alt.Chart(pd.DataFrame({"x": [0, max_value], "y": [0, max_value]})).mark_line(
                 color="#94a3b8", strokeDash=[4, 4],
             ).encode(x="x:Q", y="y:Q")
             st.altair_chart(chart + reference, width="stretch")
@@ -466,9 +542,8 @@ def show_models(report: dict, metrics: dict, scores: pd.DataFrame) -> None:
         ])
         show_table(matrix)
     with st.container(border=True):
-        panel_title("滚动验证 AP", "按三个验证窗口 AP 均值选择模型；最近窗口结果单独列示")
+        panel_title("滚动验证 AP", "按最近验证窗口的配对区间规则选型；均值与各窗口结果并列展示")
         st.altair_chart(validation_chart(report), width="stretch")
-        show_table(pd.DataFrame(report["模型比较"]))
         st.caption("欺诈率基线 AP 等于该验证窗口的欺诈占比；窗口范围仅覆盖公开数据约48小时。")
         baseline = pd.DataFrame(report["滚动验证窗口"]).rename(columns={
             "窗口": "验证窗口",
@@ -500,28 +575,70 @@ def show_policy(report: dict) -> None:
     selected = report["验证集选定策略"]
     final = report["测试集冻结策略表现"]
     capacity = report["成本假设"]["最大复核比例"]
-    cols = st.columns(4)
-    summaries = [
-        ("复核阈值", num(selected["复核阈值"], 5)),
-        ("拦截阈值", num(selected["拦截阈值"], 5)),
-        ("测试集复核率", f"{float(final['复核率']):.2%}"),
-        ("测试集模拟成本", f"{final['模拟成本']:,.2f}"),
+    cost_change = final.get("相对全部放行成本变化")
+    if cost_change is None:
+        cost_delta, cost_delta_dir = None, "neutral"
+    elif cost_change < 0:
+        cost_delta, cost_delta_dir = f"较全部放行下降 {abs(cost_change):.1%}", "up"
+    elif cost_change > 0:
+        cost_delta, cost_delta_dir = f"较全部放行上升 {cost_change:.1%}", "down"
+    else:
+        cost_delta, cost_delta_dir = "与全部放行持平", "neutral"
+    over_cap = final["是否超出复核容量"]
+    policy_kpis = [
+        ("复核阈值", num(selected["复核阈值"], 5), None, "neutral", "blue"),
+        ("拦截阈值", num(selected["拦截阈值"], 5), None, "neutral", "blue"),
+        (
+            "测试集复核率", f"{float(final['复核率']):.2%}",
+            "已超出容量上限" if over_cap else "未超出容量上限",
+            "down" if over_cap else "up", "red" if over_cap else "green",
+        ),
+        ("模拟成本", f"{final['模拟成本']:,.2f}", cost_delta, cost_delta_dir, "teal"),
     ]
-    for col, (label, value) in zip(cols, summaries):
+    cols = st.columns(4, gap="small")
+    for col, (label, value, delta, delta_dir, color) in zip(cols, policy_kpis, strict=False):
         with col:
-            st.metric(label, value)
+            kpi_card(label, value, delta, delta_dir, color)
     state = "已超出" if final["是否超出复核容量"] else "未超出"
     with st.container(border=True):
         st.markdown(f'<div class="section-kicker">复核容量状态</div><p class="finding">{state} · 当前复核率 {final["复核率"]:.2%} / 容量上限 {capacity:.0%}</p>', unsafe_allow_html=True)
         usage = min(final["复核率"] / capacity, 1.0) if capacity else 0.0
-        st.progress(usage, text=f"容量使用率 {usage:.0%}" if capacity else "容量上限未设置")
+        bar_color = "bar-red" if usage >= 0.9 else ("bar-amber" if usage >= 0.7 else "bar-teal")
+        st.markdown(
+            f'<div style="font-size:.78rem;color:var(--muted);margin-bottom:.2rem">'
+            f'{"容量使用率" if capacity else "容量上限未设置"} {usage:.0%}</div>'
+            f'<div class="capacity-bar-wrap" role="meter" aria-label="复核容量使用率" '
+            f'aria-valuemin="0" aria-valuemax="100" aria-valuenow="{usage * 100:.0f}">'
+            f'<div class="capacity-bar-fill {bar_color}" style="width:{usage * 100:.1f}%"></div></div>',
+            unsafe_allow_html=True,
+        )
         st.markdown(f'<div class="status-bar">{status_html("复核容量 " + state, "red" if final["是否超出复核容量"] else "green")}{status_html("测试集不重新调阈值", "blue")}</div>', unsafe_allow_html=True)
-    with st.container(border=True):
-        panel_title("验证集选定策略")
+    tab_val, tab_test = st.tabs(["验证集策略（阈值来源）", "测试集冻结结果"])
+    with tab_val:
         show_policy_result(selected, report["时间切分"]["验证集"], capacity)
-    with st.container(border=True):
-        panel_title("测试集冻结策略", "沿用上述阈值，不按测试结果重新调整")
+    with tab_test:
+        st.caption("沿用验证集确定的阈值，不按测试结果重新调整。")
         show_policy_result(final, report["时间切分"]["测试集"], capacity)
+    expected = report.get("期望损失策略", {})
+    if expected:
+        with st.container(border=True):
+            panel_title("期望损失策略对照", "影子价格只在验证集搜索，测试集固定复用验证集数值")
+            validation_expected = expected.get("验证集策略", {})
+            test_expected = expected.get("测试集结果", {})
+            rows = []
+            for label, result in (("验证集（搜索λ）", validation_expected), ("测试集（冻结λ）", test_expected)):
+                if result:
+                    rows.append({
+                        "数据集": label,
+                        "容量影子价格λ": result.get("容量影子价格λ"),
+                        "放行笔数": result.get("放行笔数"),
+                        "复核笔数": result.get("复核笔数"),
+                        "拦截笔数": result.get("拦截笔数"),
+                        "复核率": f"{float(result.get('复核率', 0)):.2%}",
+                        "模拟成本": result.get("模拟成本"),
+                    })
+            show_table(pd.DataFrame(rows))
+            st.caption("该策略直接最小化校准概率与交易金额的逐笔期望损失；校准段基率偏低时，概率低估会让部分高金额欺诈更倾向于放行，因此这里只作为成本对照，不替代冻结双阈值策略。")
     with st.container(border=True):
         panel_title("成本假设", "以下为设定值，未使用真实业务费用")
         show_table(pd.DataFrame(report["成本假设"].items(), columns=["成本参数", "数值"]))
@@ -536,14 +653,19 @@ def show_policy(report: dict) -> None:
             heatmap = alt.Chart(sensitivity_frame).mark_rect(cornerRadius=3).encode(
                 x=alt.X("误拦成本:O", title="误拦成本假设"),
                 y=alt.Y("金额损失倍率:O", title="欺诈金额损失倍率"),
-                color=alt.Color("测试成本:Q", scale=alt.Scale(scheme="redyellowgreen", reverse=True), title="模拟成本"),
+                color=alt.Color("测试成本:Q", scale=alt.Scale(scheme="blues"), title="模拟成本"),
                 tooltip=[
                     alt.Tooltip("金额损失倍率:Q"),
                     alt.Tooltip("误拦成本:Q"),
                     alt.Tooltip("测试成本:Q", format=",.2f"),
                 ],
             ).properties(height=180)
-            st.altair_chart(heatmap, width="stretch")
+            text_layer = alt.Chart(sensitivity_frame).mark_text(fontSize=10, color="#374151").encode(
+                x=alt.X("误拦成本:O"),
+                y=alt.Y("金额损失倍率:O"),
+                text=alt.Text("测试成本:Q", format=",.0f"),
+            )
+            st.altair_chart(heatmap + text_layer, width="stretch")
             show_table(sensitivity_frame)
 
 
@@ -588,21 +710,25 @@ def show_ai(report: dict) -> None:
                 '本地可继续在项目根目录 .env 中填写。</div>',
                 unsafe_allow_html=True,
             )
+    selected = report.get("验证集选定模型", "当前模型")
     examples = [
-        "为什么验证集选择 XGBoost？",
+        f"为什么验证集最终选定{selected}？",
         "测试集指标说明了什么？",
         "复核容量是否超出？",
         "模拟成本下降代表线上收益吗？",
         "匿名特征重要性可以解释成设备或商户吗？",
     ]
-    st.session_state.setdefault("ai_question", examples[0])
-    st.selectbox(
-        "示例问题", examples, key="ai_example", persist_state="session",
-        on_change=lambda: st.session_state.update(ai_question=st.session_state.ai_example),
-    )
-    question = st.text_area(
-        "问题", key="ai_question", persist_state="session", height=90, label_visibility="collapsed",
-    )
+    st.session_state.setdefault("ai_question_value", examples[0])
+    if "ai_question" not in st.session_state:
+        st.session_state["ai_question"] = st.session_state["ai_question_value"]
+    chip_cols = st.columns(3, gap="small")
+    for i, example in enumerate(examples[:3]):
+        with chip_cols[i]:
+            if st.button(example, key=f"ai_chip_{i}", width="stretch"):
+                st.session_state["ai_question"] = example
+                st.session_state["ai_question_value"] = example
+    question = st.text_area("问题", key="ai_question", height=90, label_visibility="collapsed")
+    st.session_state["ai_question_value"] = question
     analysis = st.session_state.get("ai_analysis")
     if analysis and analysis["report"] != report:
         st.session_state.pop("ai_analysis")
@@ -640,16 +766,39 @@ scores = pd.read_csv(score_file) if not report.get("看板分箱") and score_fil
 profile = pd.read_csv(ROOT / "reports" / "hour_profile.csv")
 
 with st.sidebar:
-    st.markdown('<div class="brand"><div class="brand-mark">风险分析</div><div class="brand-title">反欺诈风险工作台</div><div class="brand-subtitle">数据挖掘 · 模型评估 · 成本策略</div></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="brand">'
+        f'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.7rem">{SHIELD_SVG}'
+        '<span class="brand-title">反欺诈工作台</span></div>'
+        '<div class="brand-subtitle">数据挖掘 · 模型评估 · 成本策略</div></div>',
+        unsafe_allow_html=True,
+    )
+    nav_labels = {
+        "数据概览": "🔍 数据概览",
+        "模型比较": "📊 模型评估",
+        "风险策略": "⚡ 风险策略",
+        "特征解释": "🔬 特征解释",
+        "AI 风控分析": "🤖 AI 分析",
+    }
     nav = st.radio(
-        "工作区", ["数据概览", "模型比较", "风险策略", "特征解释", "AI 风控分析"],
-        label_visibility="collapsed",
+        "工作区", list(nav_labels), label_visibility="collapsed", format_func=nav_labels.get,
     )
     st.divider()
+    ap_value = f"{metrics['平均精确率AP']:.4f}"
+    cost_change = report["测试集冻结策略表现"].get("相对全部放行成本变化")
+    if cost_change is not None and cost_change < 0:
+        cost_text = f"成本降低 {abs(cost_change):.1%}"
+    elif cost_change is not None and cost_change > 0:
+        cost_text = f"成本增加 {cost_change:.1%}"
+    else:
+        cost_text = "成本已估算"
+    st.markdown(
+        f'<div class="sidebar-summary"><span class="sidebar-badge">AP {html.escape(ap_value)}</span>'
+        f'<span class="sidebar-badge">{html.escape(cost_text)}</span></div>',
+        unsafe_allow_html=True,
+    )
     source = "教学样本" if report["数据来源"] == "合成教学数据" else "公开信用卡样本"
-    st.caption(f"数据源：{source}")
-    st.caption(f"模型：{report['验证集选定模型']}")
-    st.caption("结果：离线实验")
+    st.caption(f"数据：{source}")
 
 if report["数据来源"] == "合成教学数据":
     st.markdown('<div class="callout callout-warning">当前为教学样本，仅用于展示建模流程；简历成果应使用公开信用卡数据结果。</div>', unsafe_allow_html=True)

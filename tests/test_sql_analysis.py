@@ -1,6 +1,10 @@
 import pandas as pd
+import pytest
+
 from fraud_model import make_demo_data
 from sql_analysis import analyze_transactions, connect_mysql, wilson_interval
+
+pytestmark = pytest.mark.mysql
 
 
 def test_sql_analysis_counts_nulls_and_duplicate_rows():

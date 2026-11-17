@@ -32,11 +32,14 @@ data/**/*.xlsx
 data/**/*.zip
 data/**/*.7z
 
-# 只提交看板必需的三份报告，排除实验备份和验收截图
+# 提交 ULB 与 IEEE 看板展示所需报告，排除实验备份和验收截图
 /reports/*
 !/reports/.gitkeep
 !/reports/latest.json
 !/reports/hour_profile.csv
+!/reports/ieee/
+!/reports/ieee/*.json
+!/reports/ieee/*.csv
 
 # 日志、备份和临时文件
 logs/
@@ -59,5 +62,6 @@ Thumbs.db
 /task_plan.md
 /findings.md
 /docs/superpowers/
+/.planning/
 
 # docs/images/ 中的 README 展示图需要正常提交，不忽略图片。

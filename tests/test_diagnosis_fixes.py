@@ -1,12 +1,19 @@
-import json
 import itertools
+import json
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from experiments import reliability_bins, training_parts
-from fraud_model import CostParameters, choose_policy, cost_of_actions, make_demo_data
+from fraud_model import (
+    CostParameters,
+    choose_policy,
+    cost_of_actions,
+    expected_loss_policy,
+    make_demo_data,
+    stratified_bootstrap_intervals,
+)
 from sql_analysis import analyze_transactions
 
 
@@ -21,9 +28,10 @@ def test_search_matches_exhaustive_search_with_custom_costs_and_ties(amount_weig
         score = rng.choice([.1, .2, .4, .6, .9], 20)
         amounts = rng.uniform(0, 100, 20) if amount_weighted else None
         candidates = []
-        for low, high in itertools.combinations(np.unique(score), 2):
+        thresholds = np.unique(np.r_[score, np.nextafter(score.max(), np.inf)])
+        for low, high in itertools.combinations_with_replacement(thresholds, 2):
             row = cost_of_actions(y, score, low, high, amounts=amounts, cost_params=params)
-            if row["复核笔数"] > 0 and row["拦截笔数"] > 0 and not row["是否超出复核容量"]:
+            if (row["复核笔数"] or row["拦截笔数"]) and not row["是否超出复核容量"]:
                 candidates.append(row)
         actual = choose_policy(y, score, amounts=amounts, cost_params=params)
         expected = min(candidates, key=lambda row: (row["模拟成本"], row["复核率"]))
@@ -39,10 +47,56 @@ def test_training_early_stopping_and_calibration_segments_do_not_overlap():
     assert len(fit) + len(early) + len(calibration) == len(frame)
 
 
-@pytest.mark.parametrize("scores,capacity", [([.1, .2, .3, .4], 0.), ([.5] * 4, .5)])
-def test_infeasible_nonempty_review_and_block_policy_has_clear_error(scores, capacity):
-    with pytest.raises(ValueError, match="没有满足复核容量的策略"):
-        choose_policy([0, 1, 0, 1], scores, review_capacity=capacity)
+@pytest.mark.parametrize("scores,capacity", [([.5] * 4, .5)])
+def test_choose_policy_handles_tied_scores_without_nonempty_review_block_split(scores, capacity):
+    result = choose_policy([0, 1, 0, 1], scores, review_capacity=capacity)
+    assert result["复核笔数"] == 0
+    assert result["拦截笔数"] == 4
+
+
+def test_choose_policy_allows_zero_block_actions_when_costs_prefer_review():
+    result = choose_policy(
+        [0, 1, 0, 1, 0, 0],
+        [.01, .02, .03, .04, .05, .06],
+        amounts=[1., 1., 1., 1., 1., 1.],
+        review_capacity=.5,
+        fraud_loss_multiplier=.01,
+        false_block_cost=100.,
+    )
+    assert result["拦截笔数"] == 0
+    assert result["复核笔数"] > 0
+
+
+def test_expected_loss_policy_reports_capacity_constrained_actions():
+    y = np.array([0, 1, 0, 1, 0, 1])
+    scores = np.array([.01, .8, .02, .7, .03, .6])
+    amounts = np.array([10., 100., 20., 80., 30., 60.])
+    result = expected_loss_policy(y, scores, amounts, cost_params=CostParameters(review_capacity=.5))
+    assert result["策略类型"] == "期望损失策略"
+    assert result["复核率"] <= .5
+    assert result["放行笔数"] + result["复核笔数"] + result["拦截笔数"] == len(y)
+
+
+def test_expected_loss_policy_reuses_frozen_shadow_price():
+    y = np.array([0, 1, 0, 1])
+    scores = np.array([.1, .8, .2, .7])
+    amounts = np.array([10., 100., 20., 80.])
+    validation = expected_loss_policy(y, scores, amounts, cost_params=CostParameters(review_capacity=.5))
+    frozen = expected_loss_policy(y, scores, amounts, cost_params=CostParameters(review_capacity=.5),
+                                  shadow_price=validation["容量影子价格λ"])
+    assert frozen["容量影子价格λ"] == validation["容量影子价格λ"]
+    assert frozen["放行笔数"] == validation["放行笔数"]
+    assert frozen["复核笔数"] == validation["复核笔数"]
+    assert frozen["拦截笔数"] == validation["拦截笔数"]
+
+
+def test_bootstrap_uses_custom_cost_parameters():
+    y = np.array([0, 1, 0, 1] * 5)
+    scores = np.array([.1, .8, .2, .7] * 5)
+    amounts = np.array([10., 100., 20., 80.] * 5)
+    params = CostParameters(false_block_cost=99, review_cost=7)
+    result = stratified_bootstrap_intervals(y, scores, amounts, .2, .7, iterations=20, seed=3, cost_params=params)
+    assert result["模拟成本"][1] > result["模拟成本"][0]
 
 
 def test_aggregate_bins_preserve_all_samples_including_constant_scores():

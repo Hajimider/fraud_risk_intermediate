@@ -73,10 +73,10 @@ def test_review_is_not_assumed_perfect():
     assert abs(result["模拟成本"] - 13.06) < 1e-9
 
 
-def test_policy_keeps_a_real_review_band():
+def test_policy_can_choose_zero_review_when_it_is_cheapest():
     result = choose_policy([0, 1, 0, 1, 0, 0], [.1, .95, .4, .7, .2, .3], review_capacity=.5)
-    assert result["复核阈值"] < result["拦截阈值"]
-    assert result["复核笔数"] > 0 and result["拦截笔数"] > 0
+    assert result["复核笔数"] == 0
+    assert result["拦截笔数"] > 0
 
 
 def test_full_threshold_search_matches_brute_force_with_amount_costs():
@@ -87,10 +87,9 @@ def test_full_threshold_search_matches_brute_force_with_amount_costs():
     thresholds = np.unique(np.r_[scores, np.nextafter(scores.max(), np.inf)])
     expected = min(
         (cost_of_actions(y, scores, low, high, review_capacity=.5, amounts=amounts)
-         for i, low in enumerate(thresholds[:-1]) for high in thresholds[i + 1:]
-         if 0 < ((scores >= low) & (scores < high)).sum()
-         and ((scores >= low) & (scores < high)).mean() <= .5
-         and (scores >= high).any()),
+         for i, low in enumerate(thresholds) for high in thresholds[i:]
+         if (((scores >= low) & (scores < high)).sum() or (scores >= high).sum())
+         and ((scores >= low) & (scores < high)).mean() <= .5),
         key=lambda row: (row["模拟成本"], row["复核率"]),
     )
     assert np.isclose(actual["模拟成本"], expected["模拟成本"])
@@ -130,14 +129,13 @@ def test_demo_run_writes_report(tmp_path, monkeypatch):
     assert report["验证集选定模型"] in {
         "类别加权逻辑回归",
         "类别加权XGBoost",
-        "类别加权XGBoost（移除LogAmount）",
     }
     assert len(report["滚动验证窗口"]) == 3
     assert len(report["特征消融"]) == 18
     assert report["金额特征方案"] != "both" or "XGBoost" in report["验证集选定模型"]
-    assert len(report["校准方案比较"]) == 4
-    assert len(report["看板分箱"]["分数分布"]) == 10
+    assert len(report["校准方案比较"]) == 5
+    assert sum(row["交易笔数"] for row in report["看板分箱"]["分数分布"]) == report["时间切分"]["测试集"]
     assert all("平均AP" in row and "AP标准差" in row for row in report["模型比较"])
-    assert report["SQL数据画像"]["交易总数"] == 12000
+    assert report["SQL数据画像"]["交易总数"] == report["时间切分"]["训练集"]
     assert (tmp_path / "reports" / "latest.json").exists()
     assert (tmp_path / "reports" / "test_scores.csv").exists()

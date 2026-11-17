@@ -35,7 +35,7 @@ def load_mysql_config(environ=None):
     }
 
 
-def connect_mysql():
+def connect_mysql(read_timeout=300):
     """连接项目数据库，不存在时创建；只在该库内使用连接级临时表。"""
     config = load_mysql_config()
     database = config.pop("database")
@@ -43,7 +43,7 @@ def connect_mysql():
     try:
         connection = pymysql.connect(
             **config, charset="utf8mb4", autocommit=True,
-            connect_timeout=10, read_timeout=300, write_timeout=300,
+            connect_timeout=10, read_timeout=read_timeout, write_timeout=300,
         )
         with connection.cursor() as cursor:
             cursor.execute("SELECT VERSION()")
@@ -153,7 +153,7 @@ def analyze_transactions(frame: pd.DataFrame) -> tuple[dict, pd.DataFrame]:
     profile["欺诈比例"] = profile["欺诈笔数"] / profile["交易笔数"]
     intervals = [
         wilson_interval(int(successes), int(total))
-        for successes, total in zip(profile["欺诈笔数"], profile["交易笔数"])
+        for successes, total in zip(profile["欺诈笔数"], profile["交易笔数"], strict=False)
     ]
     profile["欺诈率下限"] = [interval[0] for interval in intervals]
     profile["欺诈率上限"] = [interval[1] for interval in intervals]

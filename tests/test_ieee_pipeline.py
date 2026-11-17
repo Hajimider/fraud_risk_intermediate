@@ -2,8 +2,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ieee_pipeline import (feature_screening, fit_woe, load_ieee, prepare_keys, psi,
-                           temporal_features, transform_woe)
+from ieee_pipeline import (
+    feature_screening,
+    fit_woe,
+    load_ieee,
+    prepare_keys,
+    psi,
+    temporal_features,
+    temporal_features_target_encoding,
+    transform_woe,
+)
+
+pytestmark = pytest.mark.mysql
 
 
 def sample_transactions():
@@ -33,12 +43,29 @@ def test_sql_features_do_not_use_peers_future_or_unavailable_labels():
     assert original.iloc[2]["卡_平滑目标编码"] == 0
 
 
+def test_target_encoding_only_matches_full_window_encoding():
+    data = sample_transactions()
+    full = temporal_features(data, label_cutoff=9000, label_delay=2000)
+    history = full.drop(columns=[column for column in full if "平滑目标编码" in column])
+    lightweight = temporal_features_target_encoding(data, history, label_cutoff=9000, label_delay=2000)
+    target_columns = [column for column in full if "平滑目标编码" in column]
+    pd.testing.assert_frame_equal(full[target_columns], lightweight[target_columns])
+
+
 def test_uid_contains_first_relative_day_and_missing_is_explicit():
     frame = sample_transactions()
     frame.loc[0, "D1"] = np.nan
     keyed = prepare_keys(frame)
     assert "未知首日" in keyed.uid.iloc[0]
     assert keyed.uid.iloc[1] != keyed.uid.iloc[0]
+
+
+def test_missing_entities_remain_null_and_are_not_grouped():
+    frame = sample_transactions()
+    frame["DeviceInfo"] = pd.NA
+    keyed = prepare_keys(frame)
+    assert keyed["device_key"].isna().all()
+    assert not (keyed["device_key"] == "缺失").any()
 
 
 def test_ingestion_provenance_and_identity_uniqueness(tmp_path):
@@ -68,6 +95,7 @@ def test_woe_and_psi_handle_missing_constants_and_new_ranges():
     assert screening.loc[screening.特征 == "常量", "筛选结果"].iloc[0] == "常量"
 
 
+@pytest.mark.slow
 def test_monthly_ieee_experiment_on_explicit_synthetic_data(tmp_path):
     from ieee_experiments import monthly_windows, run_ieee
     rng = np.random.default_rng(42)

@@ -23,6 +23,7 @@ SELECT
         / NULLIF(STDDEV_POP(TransactionAmt) OVER prior_txns, 0) AS card_amount_zscore,
     COUNT(*) OVER prior_txns AS card_history_count
 FROM transactions
+WHERE card1 IS NOT NULL
 WINDOW prior_txns AS (
     PARTITION BY card1 ORDER BY TransactionDT
     RANGE BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
@@ -35,6 +36,7 @@ SELECT
     CASE WHEN COUNT(*) OVER device_history = 0 THEN 1 ELSE 0 END AS is_new_device,
     TransactionDT - MAX(TransactionDT) OVER device_history AS seconds_since_device_seen
 FROM transactions
+WHERE DeviceInfo IS NOT NULL
 WINDOW device_history AS (
     PARTITION BY DeviceInfo ORDER BY TransactionDT
     RANGE BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
@@ -44,6 +46,7 @@ WINDOW device_history AS (
 WITH keyed AS (
     SELECT *, CONCAT(CAST(card1 AS CHAR), ':', COALESCE(CAST(addr1 AS CHAR), 'NA')) AS approximate_uid
     FROM transactions
+    WHERE card1 IS NOT NULL
 )
 SELECT
     TransactionID,
@@ -72,6 +75,7 @@ WITH prior AS (
             RANGE BETWEEN UNBOUNDED PRECEDING AND 604800 PRECEDING
         ) AS prior_global_rate
     FROM transactions
+    WHERE card1 IS NOT NULL
 )
 SELECT
     TransactionID,

@@ -3,9 +3,17 @@ import json
 import pytest
 
 import ai_assistant
-from ai_assistant import (answer_question, build_context, build_messages, load_dotenv,
-                          load_ai_config, load_report, normalize_answer, offline_answer,
-                          request_timeout)
+from ai_assistant import (
+    answer_question,
+    build_context,
+    build_messages,
+    load_ai_config,
+    load_dotenv,
+    load_report,
+    normalize_answer,
+    offline_answer,
+    request_timeout,
+)
 
 
 def test_context_is_small_and_excludes_raw_test_rows():
@@ -29,6 +37,24 @@ def test_offline_answer_contains_report_fact_and_sources():
     assert f"{report['测试集指标']['平均精确率AP']:.4f}" in result["answer"]
     assert "测试集指标" in result["sources"]
     assert "字段" in result["answer"]
+
+
+def test_expected_loss_question_uses_frozen_shadow_price_summary():
+    report = load_report()
+    result = offline_answer("期望损失策略的测试成本和影子价格是多少？", report)
+    shadow_price = report["期望损失策略"]["验证集策略"]["容量影子价格λ"]
+    assert result["mode"] == "offline"
+    assert "期望损失策略" in result["sources"]
+    assert f"冻结λ={shadow_price:.4f}" in result["answer"]
+    assert "固定复用该值" in result["answer"]
+    assert "测试集放行" in result["answer"]
+
+
+def test_mixed_model_calibration_question_routes_to_calibration():
+    result = offline_answer("模型概率校准效果怎么样？", load_report())
+    assert result["mode"] == "offline"
+    assert "校准结果" in result["sources"]
+    assert "验证集按 Brier 选择" in result["answer"]
 
 
 def test_missing_ai_configuration_stays_offline():
